@@ -547,3 +547,63 @@ def test_import_news_from_json_normalizes_user_export(tmp_path, monkeypatch, cap
     assert rows[0]['metadata']['source_name'] == 'Financial Times'
     assert 'product-launch' in rows[0]['metadata']['event_tags']
     assert 'guidance-raise' in rows[0]['metadata']['event_tags']
+
+
+def test_cmd_run_session_executes_watchlist_flow_and_writes_report(tmp_path, monkeypatch, capsys):
+    from ddt import store as store_module
+    from ddt.cli import cmd_run_session
+
+    event_store = store_module.JsonlStore(tmp_path / 'events.jsonl')
+    proposal_store = store_module.JsonlStore(tmp_path / 'proposals.jsonl')
+
+    class StubPolygon:
+        def get_news(self, symbol=None, limit=5):
+            return {'results': [
+                {
+                    'title': f'{symbol} earnings beat',
+                    'description': 'desc',
+                    'article_url': f'https://example.com/{symbol}',
+                    'tickers': [symbol],
+                    'publisher': {'name': 'Bloomberg'},
+                    'keywords': ['earnings'],
+                    'insights': [{'ticker': symbol, 'sentiment': 'positive'}],
+                }
+            ]}
+        def get_last_trade(self, symbol):
+            return {'results': {'T': symbol, 'p': 100.0}}
+
+    class StubAlpaca:
+        def get_account(self): return {'status': 'ACTIVE'}
+        def get_positions(self): return []
+        def get_open_orders(self): return []
+        def get_clock(self): return {'is_open': True}
+        def preview_order(self, symbol, side, qty, time_in_force, asset_class='equity'):
+            return {'symbol': symbol, 'side': side, 'qty': qty, 'asset_class': asset_class, 'status': 'preview_only'}
+
+    monkeypatch.setattr('ddt.cli._polygon_client', lambda: StubPolygon())
+    monkeypatch.setattr('ddt.cli._alpaca_client', lambda: StubAlpaca())
+    monkeypatch.setattr('ddt.cli.event_store', lambda: event_store)
+    monkeypatch.setattr('ddt.cli.proposal_store', lambda: proposal_store)
+
+    output = tmp_path / 'session-report.json'
+    args = type('Args', (), {
+        'symbols': 'NVDA,AAPL',
+        'limit': 2,
+        'side': 'buy',
+        'qty': '1',
+        'time_in_force': 'day',
+        'asset_class': 'equity',
+        'output': str(output),
+    })()
+
+    exit_code = cmd_run_session(args)
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert 'session complete' in captured.out.lower()
+    assert output.exists()
+    import json
+    payload = json.loads(output.read_text())
+    assert payload['watchlist'][0]['symbol'] in {'NVDA', 'AAPL'}
+    assert proposal_store.read_all()
+    assert event_store.read_all()

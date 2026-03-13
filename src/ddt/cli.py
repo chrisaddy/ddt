@@ -179,15 +179,81 @@ def cmd_ingest_sample_news(_: argparse.Namespace) -> int:
 
 
 def cmd_ingest_polygon_news(args: argparse.Namespace) -> int:
-    payload = _polygon_client().get_news(args.symbol, limit=args.limit)
+    count = _ingest_polygon_news_for_symbol(args.symbol, args.limit)
+    print(f'ingested {count} polygon news events')
+    return 0
+
+
+def _ingest_polygon_news_for_symbol(symbol: str, limit: int) -> int:
+    payload = _polygon_client().get_news(symbol, limit=limit)
     store = event_store()
     count = 0
     for item in payload.get('results', []):
         event = normalize_polygon_news_item(item)
         store.append(event.to_dict())
         count += 1
-    print(f'ingested {count} polygon news events')
+    return count
+
+
+def cmd_run_session(args: argparse.Namespace) -> int:
+    symbols = [item.strip().upper() for item in args.symbols.split(',') if item.strip()]
+    ingested = 0
+    for symbol in symbols:
+        ingested += _ingest_polygon_news_for_symbol(symbol, args.limit)
+    rows = event_store().read_all()
+    events = [_event_from_row(row) for row in rows]
+    proposals_written = 0
+    store = proposal_store()
+    for symbol in symbols:
+        symbol_events = [event for event in events if symbol in [ticker.upper() for ticker in event.tickers]]
+        proposals = _build_proposals(symbol_events, symbol=symbol)
+        for proposal in proposals:
+            proposal.risk_notes = evaluate(proposal)
+            store.append(proposal.to_dict())
+            proposals_written += 1
+    watchlist_args = type('Args', (), {
+        'symbols': ','.join(symbols),
+        'limit': args.limit,
+        'side': args.side,
+        'qty': args.qty,
+        'time_in_force': args.time_in_force,
+        'asset_class': args.asset_class,
+    })()
+    watchlist = json.loads(_capture_watchlist_json(watchlist_args))
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(watchlist, indent=2), encoding='utf-8')
+    print(f'session complete: ingested {ingested} events, wrote {proposals_written} proposals, report {output}')
     return 0
+
+
+def _capture_watchlist_json(args: argparse.Namespace) -> str:
+    symbols = [item.strip().upper() for item in args.symbols.split(',') if item.strip()]
+    watchlist = []
+    for symbol in symbols:
+        symbol_args = type('Args', (), {
+            'symbol': symbol,
+            'limit': args.limit,
+            'side': args.side,
+            'qty': args.qty,
+            'time_in_force': args.time_in_force,
+            'asset_class': args.asset_class,
+        })()
+        payload = _review_symbol_payload(symbol_args)
+        notes = []
+        if len(payload.get('ranked_proposals', [])) > WATCHLIST_DAILY_CAP:
+            notes.append(f'cap: more than {WATCHLIST_DAILY_CAP} ranked proposals for symbol')
+        if any((item.get('metadata', {}) or {}).get('agreement_count', 0) <= 1 for item in payload.get('ranked_proposals', [])[:1]):
+            notes.append('cooldown: low confirmation / single-source top signal')
+        watchlist.append({
+            'symbol': symbol,
+            'top_proposal': payload.get('top_proposal'),
+            'proposal_count': len(payload.get('ranked_proposals', [])),
+            'policy_notes': notes,
+            'preview': payload.get('preview'),
+        })
+    watchlist.sort(key=lambda item: (item['top_proposal'] or {}).get('metadata', {}).get('ranking_score', -1), reverse=True)
+    return json.dumps({'watchlist': watchlist})
 
 
 
@@ -372,32 +438,7 @@ def cmd_review_symbol(args: argparse.Namespace) -> int:
 
 
 def cmd_review_watchlist(args: argparse.Namespace) -> int:
-    symbols = [item.strip().upper() for item in args.symbols.split(',') if item.strip()]
-    watchlist = []
-    for symbol in symbols:
-        symbol_args = type('Args', (), {
-            'symbol': symbol,
-            'limit': args.limit,
-            'side': args.side,
-            'qty': args.qty,
-            'time_in_force': args.time_in_force,
-            'asset_class': args.asset_class,
-        })()
-        payload = _review_symbol_payload(symbol_args)
-        notes = []
-        if len(payload.get('ranked_proposals', [])) > WATCHLIST_DAILY_CAP:
-            notes.append(f'cap: more than {WATCHLIST_DAILY_CAP} ranked proposals for symbol')
-        if any((item.get('metadata', {}) or {}).get('agreement_count', 0) <= 1 for item in payload.get('ranked_proposals', [])[:1]):
-            notes.append('cooldown: low confirmation / single-source top signal')
-        watchlist.append({
-            'symbol': symbol,
-            'top_proposal': payload.get('top_proposal'),
-            'proposal_count': len(payload.get('ranked_proposals', [])),
-            'policy_notes': notes,
-            'preview': payload.get('preview'),
-        })
-    watchlist.sort(key=lambda item: (item['top_proposal'] or {}).get('metadata', {}).get('ranking_score', -1), reverse=True)
-    print(json.dumps({'watchlist': watchlist}, indent=2))
+    print(json.dumps(json.loads(_capture_watchlist_json(args)), indent=2))
     return 0
 
 def cmd_review_market(args: argparse.Namespace) -> int:
@@ -483,6 +524,7 @@ def build_parser() -> argparse.ArgumentParser:
         'review-watchlist': cmd_review_watchlist,
         'export-review-report': cmd_export_review_report,
         'import-news-json': cmd_import_news_json,
+        'run-session': cmd_run_session,
     }
     for name, fn in simple_commands.items():
         sub = subparsers.add_parser(name)
@@ -509,13 +551,17 @@ def build_parser() -> argparse.ArgumentParser:
         if name == 'import-news-json':
             sub.add_argument('--input', required=True)
             sub.add_argument('--source', default='imported-json')
+        if name == 'run-session':
+            sub.add_argument('--symbols', required=True)
+            sub.add_argument('--limit', type=int, default=5)
+            sub.add_argument('--output', required=True)
         if name in {'preview-order', 'submit-order', 'review-symbol'}:
             sub.add_argument('--symbol', required=True)
             sub.add_argument('--side', required=True, choices=['buy', 'sell'])
             sub.add_argument('--qty', required=True)
             sub.add_argument('--time-in-force', default='day')
             sub.add_argument('--asset-class', default='equity', choices=['equity', 'crypto', 'future'])
-        if name in {'review-watchlist', 'export-review-report'}:
+        if name in {'review-watchlist', 'export-review-report', 'run-session'}:
             sub.add_argument('--side', required=True, choices=['buy', 'sell'])
             sub.add_argument('--qty', required=True)
             sub.add_argument('--time-in-force', default='day')
