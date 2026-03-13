@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from typing import Any, Callable, Dict, Optional
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from ...config import get_settings
@@ -40,23 +41,54 @@ class AlpacaClient:
             'APCA-API-KEY-ID': self.api_key or '',
             'APCA-API-SECRET-KEY': self.api_secret or '',
             'Accept': 'application/json',
+            'Content-Type': 'application/json',
         }
 
-    def _get(self, path: str) -> Dict[str, Any]:
+    def _request(self, method: str, path: str, payload: Dict[str, Any] | None = None) -> Any:
         assert self.base_url is not None
-        request = Request(f"{self.base_url}{path}", headers=self._headers(), method='GET')
+        data = json.dumps(payload).encode('utf-8') if payload is not None else None
+        request = Request(f"{self.base_url}{path}", headers=self._headers(), data=data, method=method)
         response = self.transport(request, timeout=10)
-        payload = response.read().decode('utf-8')
-        return json.loads(payload)
+        body = response.read().decode('utf-8')
+        return json.loads(body)
+
+    def _get(self, path: str) -> Any:
+        return self._request('GET', path)
+
+    def _post(self, path: str, payload: Dict[str, Any]) -> Any:
+        return self._request('POST', path, payload)
 
     def get_account(self) -> Dict[str, Any]:
         return self._get('/v2/account')
 
-    def submit_order_preview(self, symbol: str, side: str, quantity_hint: str) -> Dict[str, str]:
+    def get_positions(self) -> list[Dict[str, Any]]:
+        return self._get('/v2/positions')
+
+    def get_open_orders(self) -> list[Dict[str, Any]]:
+        query = urlencode({'status': 'open', 'direction': 'desc'})
+        return self._get(f'/v2/orders?{query}')
+
+    def preview_order(self, symbol: str, side: str, qty: str, time_in_force: str, asset_class: str = 'equity') -> Dict[str, Any]:
         return {
-            'symbol': symbol,
+            'symbol': symbol.upper(),
             'side': side,
-            'quantity_hint': quantity_hint,
+            'qty': qty,
+            'type': 'market',
+            'time_in_force': time_in_force,
+            'asset_class': asset_class,
             'status': 'preview_only',
-            'note': 'Execution adapter not implemented in scaffold.',
+            'warnings': [
+                'manual review required',
+                'submission requires explicit --confirm',
+            ],
         }
+
+    def submit_order(self, symbol: str, side: str, qty: str, time_in_force: str) -> Dict[str, Any]:
+        payload = {
+            'symbol': symbol.upper(),
+            'side': side,
+            'type': 'market',
+            'qty': qty,
+            'time_in_force': time_in_force,
+        }
+        return self._post('/v2/orders', payload)

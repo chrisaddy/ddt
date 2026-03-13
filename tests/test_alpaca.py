@@ -51,7 +51,7 @@ def test_cmd_account_prints_account_json(capsys, monkeypatch):
         def get_account(self):
             return {"id": "acct-123", "status": "ACTIVE"}
 
-    monkeypatch.setattr("ddt.cli.AlpacaClient", lambda: StubClient())
+    monkeypatch.setattr("ddt.cli._alpaca_client", lambda: StubClient())
 
     exit_code = cmd_account(None)
 

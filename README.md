@@ -2,7 +2,7 @@
 
 Hermes-native command center for news-driven discretionary trading workflows.
 
-Status: scaffolded v1 for manual approval workflows.
+Status: scaffolded v1 for manual approval workflows with Alpaca account, positions, orders, preview, and explicit submit plumbing.
 
 What this repository is for
 - Pull news from approved sources and normalize it into a common event model
@@ -12,15 +12,24 @@ What this repository is for
 - Route approved orders to Alpaca only after explicit user approval
 
 What this repository is not
-- Autonomous live trading based on LLM judgment alone
+- Autonomous live trading based on model judgment alone
 - Credential-harvesting or automated login against subscription websites without an approved integration path
 
 Quickstart
 1. python3 -m venv .venv
 2. source .venv/bin/activate
-3. PYTHONPATH=src python3 -m ddt.cli status
+3. source .envrc
+4. PYTHONPATH=src python3 -m ddt.cli status
 
 Environment variables
-- ALPACA_API_KEY
-- ALPACA_API_SECRET
+- ALPACA_API_KEY or ALPACA_KEY_ID
+- ALPACA_API_SECRET or ALPACA_SECRET_KEY
 - ALPACA_BASE_URL
+- ALPACA_DATA_URL
+
+Useful commands
+- PYTHONPATH=src python3 -m ddt.cli account
+- PYTHONPATH=src python3 -m ddt.cli positions
+- PYTHONPATH=src python3 -m ddt.cli orders
+- PYTHONPATH=src python3 -m ddt.cli preview-order --symbol AAPL --side buy --qty 1
+- PYTHONPATH=src python3 -m ddt.cli submit-order --symbol AAPL --side buy --qty 1 --confirm

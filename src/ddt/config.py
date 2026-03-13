@@ -25,3 +25,16 @@ def get_settings() -> Settings:
     settings = Settings()
     settings.state_dir.mkdir(parents=True, exist_ok=True)
     return settings
+
+
+def validate_alpaca_settings(settings: Settings) -> Settings:
+    missing = []
+    if not settings.alpaca_api_key:
+        missing.append('ALPACA_API_KEY/ALPACA_KEY_ID')
+    if not settings.alpaca_api_secret:
+        missing.append('ALPACA_API_SECRET/ALPACA_SECRET_KEY')
+    if not settings.alpaca_base_url:
+        missing.append('ALPACA_BASE_URL')
+    if missing:
+        raise ValueError('Missing Alpaca settings: ' + ', '.join(missing))
+    return settings

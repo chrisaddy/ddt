@@ -4,6 +4,7 @@ import argparse
 import json
 
 from .approval.service import InvalidTransitionError, ProposalNotFoundError, update_status
+from .config import get_settings, validate_alpaca_settings
 from .connectors.alpaca.client import AlpacaClient
 from .risk.rules import evaluate
 from .sample_data import sample_events
@@ -11,15 +12,60 @@ from .store import event_store, proposal_store
 from .strategies.news_reaction import HeadlineReactionStrategy
 
 
+def _alpaca_client() -> AlpacaClient:
+    validate_alpaca_settings(get_settings())
+    return AlpacaClient()
+
+
 def cmd_status(_: argparse.Namespace) -> int:
-    client = AlpacaClient()
+    client = _alpaca_client()
     print(json.dumps({'alpaca': client.config_summary()}, indent=2))
     return 0
 
 
 def cmd_account(_: argparse.Namespace) -> int:
-    client = AlpacaClient()
+    client = _alpaca_client()
     print(json.dumps(client.get_account(), indent=2))
+    return 0
+
+
+def cmd_positions(_: argparse.Namespace) -> int:
+    client = _alpaca_client()
+    print(json.dumps(client.get_positions(), indent=2))
+    return 0
+
+
+def cmd_orders(_: argparse.Namespace) -> int:
+    client = _alpaca_client()
+    print(json.dumps(client.get_open_orders(), indent=2))
+    return 0
+
+
+def cmd_preview_order(args: argparse.Namespace) -> int:
+    client = AlpacaClient(base_url='preview', api_key='preview', api_secret='preview')
+    preview = client.preview_order(
+        symbol=args.symbol,
+        side=args.side,
+        qty=args.qty,
+        time_in_force=args.time_in_force,
+        asset_class=args.asset_class,
+    )
+    print(json.dumps(preview, indent=2))
+    return 0
+
+
+def cmd_submit_order(args: argparse.Namespace) -> int:
+    if not args.confirm:
+        print('Refusing to submit without --confirm')
+        return 1
+    client = _alpaca_client()
+    order = client.submit_order(
+        symbol=args.symbol,
+        side=args.side,
+        qty=args.qty,
+        time_in_force=args.time_in_force,
+    )
+    print(json.dumps(order, indent=2))
     return 0
 
 
@@ -69,12 +115,34 @@ def cmd_approve(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='ddt')
     subparsers = parser.add_subparsers(dest='command', required=True)
-    commands = {'status': cmd_status, 'account': cmd_account, 'ingest-sample-news': cmd_ingest_sample_news, 'list-events': cmd_list_events, 'propose-trades': cmd_propose_trades, 'list-proposals': cmd_list_proposals, 'approve': cmd_approve}
-    for name, fn in commands.items():
+
+    simple_commands = {
+        'status': cmd_status,
+        'account': cmd_account,
+        'positions': cmd_positions,
+        'orders': cmd_orders,
+        'ingest-sample-news': cmd_ingest_sample_news,
+        'list-events': cmd_list_events,
+        'propose-trades': cmd_propose_trades,
+        'list-proposals': cmd_list_proposals,
+        'approve': cmd_approve,
+        'preview-order': cmd_preview_order,
+        'submit-order': cmd_submit_order,
+    }
+    for name, fn in simple_commands.items():
         sub = subparsers.add_parser(name)
         sub.set_defaults(func=fn)
         if name == 'approve':
             sub.add_argument('proposal_id')
+        if name in {'preview-order', 'submit-order'}:
+            sub.add_argument('--symbol', required=True)
+            sub.add_argument('--side', required=True, choices=['buy', 'sell'])
+            sub.add_argument('--qty', required=True)
+            sub.add_argument('--time-in-force', default='day')
+        if name == 'preview-order':
+            sub.add_argument('--asset-class', default='equity', choices=['equity', 'crypto', 'future'])
+        if name == 'submit-order':
+            sub.add_argument('--confirm', action='store_true')
     return parser
 
 
