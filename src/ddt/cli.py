@@ -17,6 +17,12 @@ def cmd_status(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_account(_: argparse.Namespace) -> int:
+    client = AlpacaClient()
+    print(json.dumps(client.get_account(), indent=2))
+    return 0
+
+
 def cmd_ingest_sample_news(_: argparse.Namespace) -> int:
     store = event_store()
     events = sample_events()
@@ -63,7 +69,7 @@ def cmd_approve(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='ddt')
     subparsers = parser.add_subparsers(dest='command', required=True)
-    commands = {'status': cmd_status, 'ingest-sample-news': cmd_ingest_sample_news, 'list-events': cmd_list_events, 'propose-trades': cmd_propose_trades, 'list-proposals': cmd_list_proposals, 'approve': cmd_approve}
+    commands = {'status': cmd_status, 'account': cmd_account, 'ingest-sample-news': cmd_ingest_sample_news, 'list-events': cmd_list_events, 'propose-trades': cmd_propose_trades, 'list-proposals': cmd_list_proposals, 'approve': cmd_approve}
     for name, fn in commands.items():
         sub = subparsers.add_parser(name)
         sub.set_defaults(func=fn)
