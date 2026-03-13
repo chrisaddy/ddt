@@ -141,6 +141,64 @@ def cmd_ingest_polygon_news(args: argparse.Namespace) -> int:
 
 
 
+
+
+def _parse_iso(ts: str) -> float:
+    from datetime import datetime
+    if not ts:
+        return 0.0
+    try:
+        return datetime.fromisoformat(ts.replace('Z', '+00:00')).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _rank_proposal_dicts(proposals: list[dict]) -> list[dict]:
+    if not proposals:
+        return []
+    agreement = {}
+    recency = {}
+    for proposal in proposals:
+        key = (proposal['symbol'].upper(), proposal['side'].lower(), proposal.get('metadata', {}).get('dedupe_key', ''))
+        agreement[key] = agreement.get(key, 0) + 1
+        recency[key] = max(recency.get(key, 0.0), _parse_iso(proposal.get('created_at', '')))
+    newest = max(recency.values()) if recency else 0.0
+    ranked = []
+    for proposal in proposals:
+        key = (proposal['symbol'].upper(), proposal['side'].lower(), proposal.get('metadata', {}).get('dedupe_key', ''))
+        age_penalty = min(0.15, max(0.0, (newest - recency[key]) / 86400.0 * 0.01)) if newest else 0.0
+        ranking_score = round(proposal.get('confidence', 0.0) + (agreement[key] - 1) * 0.05 - age_penalty, 2)
+        proposal = dict(proposal)
+        metadata = dict(proposal.get('metadata', {}))
+        metadata['agreement_count'] = agreement[key]
+        metadata['ranking_score'] = ranking_score
+        proposal['metadata'] = metadata
+        ranked.append(proposal)
+    ranked.sort(key=lambda p: p['metadata']['ranking_score'], reverse=True)
+    return ranked
+
+
+def _review_symbol_payload(args: argparse.Namespace) -> dict:
+    rows = event_store().read_all()
+    events = [_event_from_row(row) for row in rows]
+    symbol = args.symbol.upper()
+    matching_events = [event for event in events if symbol in [ticker.upper() for ticker in event.tickers]]
+    raw_proposals = _raw_proposals(matching_events, symbol=symbol)
+    ranked_proposals = _rank_proposal_dicts([proposal.to_dict() for proposal in raw_proposals])
+    proposal_dicts = _dedupe_proposals(raw_proposals)
+    proposal_dicts = [proposal.to_dict() for proposal in proposal_dicts]
+    preview = _guarded_preview(args)
+    return {
+        'symbol': symbol,
+        'quote': _polygon_client().get_last_trade(symbol),
+        'recent_news': _polygon_client().get_news(symbol, limit=args.limit).get('results', []),
+        'stored_events': [event.to_dict() for event in matching_events],
+        'generated_proposals': proposal_dicts,
+        'ranked_proposals': ranked_proposals,
+        'top_proposal': ranked_proposals[0] if ranked_proposals else None,
+        'preview': preview,
+    }
+
 def _refresh_event_metadata(event: NewsEvent) -> NewsEvent:
     publisher = event.metadata.get('publisher', {}) or {}
     source_name = publisher.get('name', event.metadata.get('source_name', 'unknown'))
@@ -170,12 +228,16 @@ def cmd_backfill_event_metadata(_: argparse.Namespace) -> int:
     print(f'updated {count} events')
     return 0
 
-def _build_proposals(events: list[NewsEvent], symbol: str | None = None) -> list:
+def _raw_proposals(events: list[NewsEvent], symbol: str | None = None) -> list:
     proposals = HeadlineReactionStrategy().generate(events)
     if symbol:
         symbol = symbol.upper()
         proposals = [proposal for proposal in proposals if proposal.symbol.upper() == symbol]
-    return _dedupe_proposals(proposals)
+    return proposals
+
+
+def _build_proposals(events: list[NewsEvent], symbol: str | None = None) -> list:
+    return _dedupe_proposals(_raw_proposals(events, symbol=symbol))
 
 
 
@@ -245,24 +307,31 @@ def cmd_list_proposals(_: argparse.Namespace) -> int:
 
 
 def cmd_review_symbol(args: argparse.Namespace) -> int:
-    rows = event_store().read_all()
-    events = [_event_from_row(row) for row in rows]
-    symbol = args.symbol.upper()
-    matching_events = [event for event in events if symbol in [ticker.upper() for ticker in event.tickers]]
-    proposals = _build_proposals(matching_events, symbol=symbol)
-    ranked_proposals = sorted([proposal.to_dict() for proposal in proposals], key=lambda p: p.get('confidence', 0), reverse=True)
-    preview = _guarded_preview(args)
-    summary = {
-        'symbol': symbol,
-        'quote': _polygon_client().get_last_trade(symbol),
-        'recent_news': _polygon_client().get_news(symbol, limit=args.limit).get('results', []),
-        'stored_events': [event.to_dict() for event in matching_events],
-        'generated_proposals': [proposal.to_dict() for proposal in proposals],
-        'ranked_proposals': ranked_proposals,
-        'top_proposal': ranked_proposals[0] if ranked_proposals else None,
-        'preview': preview,
-    }
-    print(json.dumps(summary, indent=2))
+    print(json.dumps(_review_symbol_payload(args), indent=2))
+    return 0
+
+
+def cmd_review_watchlist(args: argparse.Namespace) -> int:
+    symbols = [item.strip().upper() for item in args.symbols.split(',') if item.strip()]
+    watchlist = []
+    for symbol in symbols:
+        symbol_args = type('Args', (), {
+            'symbol': symbol,
+            'limit': args.limit,
+            'side': args.side,
+            'qty': args.qty,
+            'time_in_force': args.time_in_force,
+            'asset_class': args.asset_class,
+        })()
+        payload = _review_symbol_payload(symbol_args)
+        watchlist.append({
+            'symbol': symbol,
+            'top_proposal': payload.get('top_proposal'),
+            'proposal_count': len(payload.get('ranked_proposals', [])),
+            'preview': payload.get('preview'),
+        })
+    watchlist.sort(key=lambda item: (item['top_proposal'] or {}).get('metadata', {}).get('ranking_score', -1), reverse=True)
+    print(json.dumps({'watchlist': watchlist}, indent=2))
     return 0
 
 def cmd_review_market(args: argparse.Namespace) -> int:
@@ -310,6 +379,7 @@ def build_parser() -> argparse.ArgumentParser:
         'submit-order': cmd_submit_order,
         'review-market': cmd_review_market,
         'review-symbol': cmd_review_symbol,
+        'review-watchlist': cmd_review_watchlist,
     }
     for name, fn in simple_commands.items():
         sub = subparsers.add_parser(name)
@@ -323,8 +393,16 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument('--limit', type=int, default=5)
         if name == 'review-symbol':
             sub.add_argument('--limit', type=int, default=5)
+        if name == 'review-watchlist':
+            sub.add_argument('--symbols', required=True)
+            sub.add_argument('--limit', type=int, default=5)
         if name in {'preview-order', 'submit-order', 'review-symbol'}:
             sub.add_argument('--symbol', required=True)
+            sub.add_argument('--side', required=True, choices=['buy', 'sell'])
+            sub.add_argument('--qty', required=True)
+            sub.add_argument('--time-in-force', default='day')
+            sub.add_argument('--asset-class', default='equity', choices=['equity', 'crypto', 'future'])
+        if name == 'review-watchlist':
             sub.add_argument('--side', required=True, choices=['buy', 'sell'])
             sub.add_argument('--qty', required=True)
             sub.add_argument('--time-in-force', default='day')

@@ -309,3 +309,97 @@ def test_review_symbol_ranks_proposals_by_confidence_and_exposes_top_proposal(tm
     payload = json.loads(captured.out)
     assert payload['top_proposal']['confidence'] >= payload['ranked_proposals'][1]['confidence']
     assert payload['top_proposal']['metadata']['source_name'] == 'Bloomberg'
+
+
+def test_review_symbol_ranking_prefers_recent_multi_source_agreement(tmp_path, monkeypatch, capsys):
+    from ddt import store as store_module
+    from ddt.cli import cmd_review_symbol
+
+    event_store = store_module.JsonlStore(tmp_path / 'events.jsonl')
+    recent_common = {
+        'source': 'polygon',
+        'summary': 'recent strong signal',
+        'asset_classes': ['equity'],
+        'tickers': ['NVDA'],
+        'created_at': '2026-03-13T03:00:00+00:00',
+        'metadata': {'sentiment': 'positive', 'event_tags': ['earnings'], 'source_score': 0.95, 'source_name': 'Bloomberg', 'dedupe_key': 'nvda earnings beat'}
+    }
+    older_common = {
+        'source': 'polygon',
+        'summary': 'older weaker signal',
+        'asset_classes': ['equity'],
+        'tickers': ['NVDA'],
+        'created_at': '2026-03-01T03:00:00+00:00',
+        'metadata': {'sentiment': 'positive', 'event_tags': [], 'source_score': 0.55, 'source_name': 'GlobeNewswire Inc.', 'dedupe_key': 'nvda generic mention'}
+    }
+    event_store.append(NewsEvent(headline='NVDA earnings beat', url='https://example.com/1', **recent_common).to_dict())
+    event_store.append(NewsEvent(headline='NVDA earnings beat', url='https://example.com/2', **{**recent_common, 'metadata': {**recent_common['metadata'], 'source_score': 0.9, 'source_name': 'Financial Times'}}).to_dict())
+    event_store.append(NewsEvent(headline='NVDA generic mention', url='https://example.com/3', **older_common).to_dict())
+
+    class StubAlpaca:
+        def get_account(self): return {'status': 'ACTIVE'}
+        def get_positions(self): return []
+        def get_open_orders(self): return []
+        def get_clock(self): return {'is_open': True}
+        def preview_order(self, symbol, side, qty, time_in_force, asset_class='equity'):
+            return {'symbol': symbol, 'side': side, 'qty': qty, 'asset_class': asset_class, 'status': 'preview_only'}
+
+    class StubPolygon:
+        def get_last_trade(self, symbol): return {'results': {'T': symbol, 'p': 100.0}}
+        def get_news(self, symbol=None, limit=5): return {'results': []}
+
+    monkeypatch.setattr('ddt.cli._alpaca_client', lambda: StubAlpaca())
+    monkeypatch.setattr('ddt.cli._polygon_client', lambda: StubPolygon())
+    monkeypatch.setattr('ddt.cli.event_store', lambda: event_store)
+    args = type('Args', (), {'symbol': 'NVDA', 'limit': 5, 'side': 'buy', 'qty': '1', 'time_in_force': 'day', 'asset_class': 'equity'})()
+
+    exit_code = cmd_review_symbol(args)
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    import json
+    payload = json.loads(captured.out)
+    assert payload['top_proposal']['metadata']['dedupe_key'] == 'nvda earnings beat'
+    assert payload['top_proposal']['metadata']['agreement_count'] == 2
+    assert payload['top_proposal']['metadata']['ranking_score'] > payload['ranked_proposals'][-1]['metadata']['ranking_score']
+
+
+def test_review_watchlist_sorts_symbols_by_top_proposal_score(tmp_path, monkeypatch, capsys):
+    from ddt import store as store_module
+    from ddt.cli import cmd_review_watchlist
+
+    event_store = store_module.JsonlStore(tmp_path / 'events.jsonl')
+    event_store.append(NewsEvent(
+        source='polygon', headline='NVDA earnings beat', summary='strong', url='https://example.com/nvda',
+        tickers=['NVDA'], asset_classes=['equity'], created_at='2026-03-13T03:00:00+00:00',
+        metadata={'sentiment': 'positive', 'event_tags': ['earnings'], 'source_score': 0.95, 'source_name': 'Bloomberg', 'dedupe_key': 'nvda earnings beat'}
+    ).to_dict())
+    event_store.append(NewsEvent(
+        source='polygon', headline='AAPL mentioned in roundup', summary='weaker', url='https://example.com/aapl',
+        tickers=['AAPL'], asset_classes=['equity'], created_at='2026-03-01T03:00:00+00:00',
+        metadata={'sentiment': 'positive', 'event_tags': [], 'source_score': 0.5, 'source_name': 'unknown', 'dedupe_key': 'aapl roundup'}
+    ).to_dict())
+
+    class StubAlpaca:
+        def get_account(self): return {'status': 'ACTIVE'}
+        def get_positions(self): return []
+        def get_open_orders(self): return []
+        def get_clock(self): return {'is_open': True}
+        def preview_order(self, symbol, side, qty, time_in_force, asset_class='equity'):
+            return {'symbol': symbol, 'side': side, 'qty': qty, 'asset_class': asset_class, 'status': 'preview_only'}
+
+    class StubPolygon:
+        def get_last_trade(self, symbol): return {'results': {'T': symbol, 'p': 100.0}}
+        def get_news(self, symbol=None, limit=5): return {'results': []}
+
+    monkeypatch.setattr('ddt.cli._alpaca_client', lambda: StubAlpaca())
+    monkeypatch.setattr('ddt.cli._polygon_client', lambda: StubPolygon())
+    monkeypatch.setattr('ddt.cli.event_store', lambda: event_store)
+    args = type('Args', (), {'symbols': 'AAPL,NVDA', 'limit': 5, 'side': 'buy', 'qty': '1', 'time_in_force': 'day', 'asset_class': 'equity'})()
+
+    exit_code = cmd_review_watchlist(args)
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    import json
+    payload = json.loads(captured.out)
+    assert payload['watchlist'][0]['symbol'] == 'NVDA'
+    assert payload['watchlist'][0]['top_proposal']['metadata']['ranking_score'] >= payload['watchlist'][1]['top_proposal']['metadata']['ranking_score']
