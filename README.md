@@ -41,3 +41,13 @@ Useful commands
 - PYTHONPATH=src python3 -m ddt.cli review-market --symbol AAPL --limit 5
 - PYTHONPATH=src python3 -m ddt.cli preview-order --symbol AAPL --side buy --qty 1 --time-in-force day --asset-class equity
 - PYTHONPATH=src python3 -m ddt.cli submit-order --symbol AAPL --side buy --qty 1 --time-in-force day --asset-class equity --confirm
+
+IBKR Client Portal setup
+- Run IBKR Client Portal Gateway or IB Gateway/TWS-compatible local HTTP bridge
+- Set IBKR_BASE_URL (default https://localhost:5000/v1/api)
+- Set IBKR_ACCOUNT_ID
+- Optionally set IBKR_VERIFY_SSL=false for local self-signed gateway certs
+- Commands:
+  - PYTHONPATH=src python3 -m ddt.cli ibkr-status
+  - PYTHONPATH=src python3 -m ddt.cli ibkr-accounts
+  - PYTHONPATH=src python3 -m ddt.cli ibkr-search-contracts --symbol CL

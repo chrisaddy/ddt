@@ -40,6 +40,9 @@ class Settings:
     alpaca_data_url: str = _first_env('ALPACA_DATA_URL', default='https://data.alpaca.markets')
     polygon_api_key: str = _first_env('POLYGON_API_KEY')
     polygon_base_url: str = _first_env('POLYGON_BASE_URL', default='https://api.polygon.io')
+    ibkr_base_url: str = _first_env('IBKR_BASE_URL', default='https://localhost:5000/v1/api')
+    ibkr_account_id: str = _first_env('IBKR_ACCOUNT_ID')
+    ibkr_verify_ssl: bool = _env_bool('IBKR_VERIFY_SSL', False)
     max_order_notional: float = _env_float('DDT_MAX_ORDER_NOTIONAL', 250.0)
     banned_symbols: list[str] = None
     enforce_market_hours: bool = _env_bool('DDT_ENFORCE_MARKET_HOURS', True)
@@ -76,4 +79,15 @@ def validate_polygon_settings(settings: Settings) -> Settings:
         missing.append('POLYGON_BASE_URL')
     if missing:
         raise ValueError('Missing Polygon settings: ' + ', '.join(missing))
+    return settings
+
+
+def validate_ibkr_settings(settings: Settings) -> Settings:
+    missing = []
+    if not settings.ibkr_base_url:
+        missing.append('IBKR_BASE_URL')
+    if not settings.ibkr_account_id:
+        missing.append('IBKR_ACCOUNT_ID')
+    if missing:
+        raise ValueError('Missing IBKR settings: ' + ', '.join(missing))
     return settings

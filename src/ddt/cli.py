@@ -5,9 +5,10 @@ import json
 from pathlib import Path
 
 from .approval.service import InvalidTransitionError, ProposalNotFoundError, update_status
-from .config import get_settings, validate_alpaca_settings, validate_polygon_settings
+from .config import get_settings, validate_alpaca_settings, validate_polygon_settings, validate_ibkr_settings
 from .connectors.alpaca.client import AlpacaClient
 from .connectors.polygon.client import PolygonClient
+from .connectors.ibkr.client import IbkrClient
 from .guardrails.orders import evaluate_order_guardrails, guardrail_config_from_settings
 from .models import NewsEvent
 from .news.normalize import infer_event_tags, infer_sentiment, normalize_polygon_news_item, score_publisher, dedupe_key
@@ -31,6 +32,11 @@ def _alpaca_client() -> AlpacaClient:
 def _polygon_client() -> PolygonClient:
     validate_polygon_settings(get_settings())
     return PolygonClient()
+
+
+def _ibkr_client() -> IbkrClient:
+    validate_ibkr_settings(get_settings())
+    return IbkrClient()
 
 
 def _latest_price(result: dict) -> float:
@@ -67,6 +73,22 @@ def _guarded_preview(args: argparse.Namespace) -> dict:
     preview['market_price'] = _latest_price(quote)
     return preview
 
+
+
+
+def cmd_ibkr_status(_: argparse.Namespace) -> int:
+    print(json.dumps({'ibkr': _ibkr_client().config_summary()}, indent=2))
+    return 0
+
+
+def cmd_ibkr_accounts(_: argparse.Namespace) -> int:
+    print(json.dumps(_ibkr_client().list_accounts(), indent=2))
+    return 0
+
+
+def cmd_ibkr_search_contracts(args: argparse.Namespace) -> int:
+    print(json.dumps(_ibkr_client().search_contracts(args.symbol), indent=2))
+    return 0
 
 def cmd_status(_: argparse.Namespace) -> int:
     client = _alpaca_client()
@@ -408,6 +430,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     simple_commands = {
         'status': cmd_status,
+        'ibkr-status': cmd_ibkr_status,
+        'ibkr-accounts': cmd_ibkr_accounts,
+        'ibkr-search-contracts': cmd_ibkr_search_contracts,
         'account': cmd_account,
         'positions': cmd_positions,
         'orders': cmd_orders,
@@ -433,7 +458,7 @@ def build_parser() -> argparse.ArgumentParser:
         sub.set_defaults(func=fn)
         if name == 'approve':
             sub.add_argument('proposal_id')
-        if name in {'market-quote'}:
+        if name in {'market-quote', 'ibkr-search-contracts'}:
             sub.add_argument('--symbol', required=True)
         if name in {'ingest-polygon-news', 'review-market', 'build-proposals-from-events'}:
             sub.add_argument('--symbol', required=False, default=None)
