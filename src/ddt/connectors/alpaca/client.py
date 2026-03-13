@@ -47,7 +47,7 @@ class AlpacaClient:
     def _request(self, method: str, path: str, payload: Dict[str, Any] | None = None) -> Any:
         assert self.base_url is not None
         data = json.dumps(payload).encode('utf-8') if payload is not None else None
-        request = Request(f"{self.base_url}{path}", headers=self._headers(), data=data, method=method)
+        request = Request(f'{self.base_url}{path}', headers=self._headers(), data=data, method=method)
         response = self.transport(request, timeout=10)
         body = response.read().decode('utf-8')
         return json.loads(body)
@@ -67,6 +67,9 @@ class AlpacaClient:
     def get_open_orders(self) -> list[Dict[str, Any]]:
         query = urlencode({'status': 'open', 'direction': 'desc'})
         return self._get(f'/v2/orders?{query}')
+
+    def get_clock(self) -> Dict[str, Any]:
+        return self._get('/v2/clock')
 
     def preview_order(self, symbol: str, side: str, qty: str, time_in_force: str, asset_class: str = 'equity') -> Dict[str, Any]:
         return {

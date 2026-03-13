@@ -97,7 +97,8 @@ def test_validate_alpaca_settings_raises_when_missing_keys():
         validate_alpaca_settings(settings)
 
 
-def test_cmd_preview_order_prints_preview(capsys):
+def test_cmd_preview_order_prints_preview(capsys, monkeypatch):
+    monkeypatch.setattr('ddt.cli._guarded_preview', lambda args: {'symbol': 'AAPL', 'status': 'preview_only', 'guardrail_notes': []})
     args = type(
         "Args",
         (),
@@ -136,6 +137,7 @@ def test_cmd_submit_order_calls_client_when_confirmed(capsys, monkeypatch):
             return {"id": "ord-1", "status": "accepted"}
 
     monkeypatch.setattr("ddt.cli._alpaca_client", lambda: StubClient())
+    monkeypatch.setattr("ddt.cli._guarded_preview", lambda args: {'guardrail_notes': []})
     args = type(
         "Args",
         (),

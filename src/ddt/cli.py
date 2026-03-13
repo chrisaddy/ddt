@@ -4,8 +4,11 @@ import argparse
 import json
 
 from .approval.service import InvalidTransitionError, ProposalNotFoundError, update_status
-from .config import get_settings, validate_alpaca_settings
+from .config import get_settings, validate_alpaca_settings, validate_polygon_settings
 from .connectors.alpaca.client import AlpacaClient
+from .connectors.polygon.client import PolygonClient
+from .guardrails.orders import evaluate_order_guardrails, guardrail_config_from_settings
+from .models import NewsEvent
 from .risk.rules import evaluate
 from .sample_data import sample_events
 from .store import event_store, proposal_store
@@ -15,6 +18,46 @@ from .strategies.news_reaction import HeadlineReactionStrategy
 def _alpaca_client() -> AlpacaClient:
     validate_alpaca_settings(get_settings())
     return AlpacaClient()
+
+
+def _polygon_client() -> PolygonClient:
+    validate_polygon_settings(get_settings())
+    return PolygonClient()
+
+
+def _latest_price(result: dict) -> float:
+    payload = result.get('results', {})
+    return float(payload.get('p', 0) or 0)
+
+
+def _market_is_open(alpaca: AlpacaClient, asset_class: str) -> bool:
+    if asset_class != 'equity':
+        return True
+    return bool(alpaca.get_clock().get('is_open', False))
+
+
+def _guarded_preview(args: argparse.Namespace) -> dict:
+    alpaca = _alpaca_client()
+    polygon = _polygon_client()
+    preview = alpaca.preview_order(
+        symbol=args.symbol,
+        side=args.side,
+        qty=args.qty,
+        time_in_force=args.time_in_force,
+        asset_class=args.asset_class,
+    )
+    quote = polygon.get_last_trade(args.symbol)
+    open_orders = alpaca.get_open_orders()
+    notes = evaluate_order_guardrails(
+        preview,
+        market={'last_price': _latest_price(quote)},
+        config=guardrail_config_from_settings(),
+        open_orders=open_orders,
+        market_is_open=_market_is_open(alpaca, args.asset_class),
+    )
+    preview['guardrail_notes'] = notes
+    preview['market_price'] = _latest_price(quote)
+    return preview
 
 
 def cmd_status(_: argparse.Namespace) -> int:
@@ -41,22 +84,23 @@ def cmd_orders(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_market_quote(args: argparse.Namespace) -> int:
+    print(json.dumps(_polygon_client().get_last_trade(args.symbol), indent=2))
+    return 0
+
+
 def cmd_preview_order(args: argparse.Namespace) -> int:
-    client = AlpacaClient(base_url='preview', api_key='preview', api_secret='preview')
-    preview = client.preview_order(
-        symbol=args.symbol,
-        side=args.side,
-        qty=args.qty,
-        time_in_force=args.time_in_force,
-        asset_class=args.asset_class,
-    )
-    print(json.dumps(preview, indent=2))
+    print(json.dumps(_guarded_preview(args), indent=2))
     return 0
 
 
 def cmd_submit_order(args: argparse.Namespace) -> int:
     if not args.confirm:
         print('Refusing to submit without --confirm')
+        return 1
+    preview = _guarded_preview(args)
+    if preview['guardrail_notes']:
+        print(json.dumps({'error': 'order blocked by guardrails', 'preview': preview}, indent=2))
         return 1
     client = _alpaca_client()
     order = client.submit_order(
@@ -75,6 +119,26 @@ def cmd_ingest_sample_news(_: argparse.Namespace) -> int:
     for event in events:
         store.append(event.to_dict())
     print(f'ingested {len(events)} sample events')
+    return 0
+
+
+def cmd_ingest_polygon_news(args: argparse.Namespace) -> int:
+    payload = _polygon_client().get_news(args.symbol, limit=args.limit)
+    store = event_store()
+    count = 0
+    for item in payload.get('results', []):
+        event = NewsEvent(
+            source='polygon',
+            headline=item.get('title', ''),
+            summary=item.get('description', ''),
+            url=item.get('article_url', ''),
+            tickers=item.get('tickers', []),
+            asset_classes=['equity'],
+            metadata={'publisher': item.get('publisher', {})},
+        )
+        store.append(event.to_dict())
+        count += 1
+    print(f'ingested {count} polygon news events')
     return 0
 
 
@@ -102,6 +166,19 @@ def cmd_list_proposals(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_review_market(args: argparse.Namespace) -> int:
+    alpaca = _alpaca_client()
+    polygon = _polygon_client()
+    summary = {
+        'account': alpaca.get_account(),
+        'positions': alpaca.get_positions(),
+        'open_orders': alpaca.get_open_orders(),
+        'news': polygon.get_news(args.symbol, limit=args.limit).get('results', []),
+    }
+    print(json.dumps(summary, indent=2))
+    return 0
+
+
 def cmd_approve(args: argparse.Namespace) -> int:
     try:
         updated = update_status(args.proposal_id, 'approved')
@@ -121,25 +198,32 @@ def build_parser() -> argparse.ArgumentParser:
         'account': cmd_account,
         'positions': cmd_positions,
         'orders': cmd_orders,
+        'market-quote': cmd_market_quote,
         'ingest-sample-news': cmd_ingest_sample_news,
+        'ingest-polygon-news': cmd_ingest_polygon_news,
         'list-events': cmd_list_events,
         'propose-trades': cmd_propose_trades,
         'list-proposals': cmd_list_proposals,
         'approve': cmd_approve,
         'preview-order': cmd_preview_order,
         'submit-order': cmd_submit_order,
+        'review-market': cmd_review_market,
     }
     for name, fn in simple_commands.items():
         sub = subparsers.add_parser(name)
         sub.set_defaults(func=fn)
         if name == 'approve':
             sub.add_argument('proposal_id')
+        if name in {'market-quote'}:
+            sub.add_argument('--symbol', required=True)
+        if name in {'ingest-polygon-news', 'review-market'}:
+            sub.add_argument('--symbol', required=False, default=None)
+            sub.add_argument('--limit', type=int, default=5)
         if name in {'preview-order', 'submit-order'}:
             sub.add_argument('--symbol', required=True)
             sub.add_argument('--side', required=True, choices=['buy', 'sell'])
             sub.add_argument('--qty', required=True)
             sub.add_argument('--time-in-force', default='day')
-        if name == 'preview-order':
             sub.add_argument('--asset-class', default='equity', choices=['equity', 'crypto', 'future'])
         if name == 'submit-order':
             sub.add_argument('--confirm', action='store_true')
