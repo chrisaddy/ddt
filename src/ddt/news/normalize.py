@@ -8,8 +8,13 @@ POSITIVE_WORDS = ('beats', 'surge', 'wins', 'approval', 'partnership', 'upgrade'
 NEGATIVE_WORDS = ('misses', 'probe', 'cuts', 'fraud', 'delay', 'downgrade', 'lawsuit')
 TAG_WORDS = {
     'earnings': ('earnings', 'beat', 'miss'),
-    'partnership': ('partnership', 'deal'),
-    'regulatory': ('probe', 'lawsuit', 'approval'),
+    'partnership': ('partnership',),
+    'mna': ('acquisition', 'merger', 'buyout'),
+    'product-launch': ('launches', 'launch', 'unveils', 'releases'),
+    'regulatory': ('probe', 'lawsuit', 'approval', 'investigation'),
+    'guidance-raise': ('raises guidance', 'guidance raised', 'boosts outlook'),
+    'guidance-cut': ('cuts guidance', 'lowers guidance', 'reduces outlook'),
+    'macro': ('tariff', 'inflation', 'rates', 'macro'),
     'analyst-upgrade': ('upgrade',),
     'analyst-downgrade': ('downgrade',),
 }

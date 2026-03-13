@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 from .approval.service import InvalidTransitionError, ProposalNotFoundError, update_status
 from .config import get_settings, validate_alpaca_settings, validate_polygon_settings
@@ -14,6 +15,12 @@ from .risk.rules import evaluate
 from .sample_data import sample_events
 from .store import event_store, proposal_store
 from .strategies.news_reaction import HeadlineReactionStrategy
+
+
+STALE_AFTER_SECONDS = 7 * 24 * 3600
+MAX_RANKED_PROPOSALS = 5
+WATCHLIST_DAILY_CAP = 2
+
 
 
 def _alpaca_client() -> AlpacaClient:
@@ -158,6 +165,7 @@ def _rank_proposal_dicts(proposals: list[dict]) -> list[dict]:
         return []
     agreement = {}
     recency = {}
+    now = max((_parse_iso(p.get('created_at', '')) for p in proposals), default=0.0)
     for proposal in proposals:
         key = (proposal['symbol'].upper(), proposal['side'].lower(), proposal.get('metadata', {}).get('dedupe_key', ''))
         agreement[key] = agreement.get(key, 0) + 1
@@ -166,16 +174,20 @@ def _rank_proposal_dicts(proposals: list[dict]) -> list[dict]:
     ranked = []
     for proposal in proposals:
         key = (proposal['symbol'].upper(), proposal['side'].lower(), proposal.get('metadata', {}).get('dedupe_key', ''))
-        age_penalty = min(0.15, max(0.0, (newest - recency[key]) / 86400.0 * 0.01)) if newest else 0.0
-        ranking_score = round(proposal.get('confidence', 0.0) + (agreement[key] - 1) * 0.05 - age_penalty, 2)
+        age_seconds = max(0.0, now - recency[key]) if now else 0.0
+        is_stale = age_seconds > STALE_AFTER_SECONDS
+        age_penalty = min(0.25, age_seconds / 86400.0 * 0.01) if now else 0.0
+        stale_penalty = 0.2 if is_stale else 0.0
+        ranking_score = round(proposal.get('confidence', 0.0) + (agreement[key] - 1) * 0.05 - age_penalty - stale_penalty, 2)
         proposal = dict(proposal)
         metadata = dict(proposal.get('metadata', {}))
         metadata['agreement_count'] = agreement[key]
         metadata['ranking_score'] = ranking_score
+        metadata['is_stale'] = is_stale
         proposal['metadata'] = metadata
         ranked.append(proposal)
     ranked.sort(key=lambda p: p['metadata']['ranking_score'], reverse=True)
-    return ranked
+    return ranked[:MAX_RANKED_PROPOSALS]
 
 
 def _review_symbol_payload(args: argparse.Namespace) -> dict:
@@ -324,10 +336,16 @@ def cmd_review_watchlist(args: argparse.Namespace) -> int:
             'asset_class': args.asset_class,
         })()
         payload = _review_symbol_payload(symbol_args)
+        notes = []
+        if len(payload.get('ranked_proposals', [])) > WATCHLIST_DAILY_CAP:
+            notes.append(f'cap: more than {WATCHLIST_DAILY_CAP} ranked proposals for symbol')
+        if any((item.get('metadata', {}) or {}).get('agreement_count', 0) <= 1 for item in payload.get('ranked_proposals', [])[:1]):
+            notes.append('cooldown: low confirmation / single-source top signal')
         watchlist.append({
             'symbol': symbol,
             'top_proposal': payload.get('top_proposal'),
             'proposal_count': len(payload.get('ranked_proposals', [])),
+            'policy_notes': notes,
             'preview': payload.get('preview'),
         })
     watchlist.sort(key=lambda item: (item['top_proposal'] or {}).get('metadata', {}).get('ranking_score', -1), reverse=True)
@@ -357,6 +375,33 @@ def cmd_approve(args: argparse.Namespace) -> int:
     return 0
 
 
+
+
+def cmd_export_review_report(args: argparse.Namespace) -> int:
+    if args.mode == 'symbol':
+        payload = _review_symbol_payload(args)
+    else:
+        payload = {'watchlist': []}
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+    print(f'wrote report to {output}')
+    return 0
+
+
+def cmd_import_news_json(args: argparse.Namespace) -> int:
+    rows = json.loads(Path(args.input).read_text(encoding='utf-8'))
+    store = event_store()
+    count = 0
+    for item in rows:
+        event = normalize_polygon_news_item(item)
+        if args.source:
+            event.source = args.source
+        store.append(event.to_dict())
+        count += 1
+    print(f'imported {count} news events')
+    return 0
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='ddt')
     subparsers = parser.add_subparsers(dest='command', required=True)
@@ -380,6 +425,8 @@ def build_parser() -> argparse.ArgumentParser:
         'review-market': cmd_review_market,
         'review-symbol': cmd_review_symbol,
         'review-watchlist': cmd_review_watchlist,
+        'export-review-report': cmd_export_review_report,
+        'import-news-json': cmd_import_news_json,
     }
     for name, fn in simple_commands.items():
         sub = subparsers.add_parser(name)
@@ -396,13 +443,21 @@ def build_parser() -> argparse.ArgumentParser:
         if name == 'review-watchlist':
             sub.add_argument('--symbols', required=True)
             sub.add_argument('--limit', type=int, default=5)
+        if name == 'export-review-report':
+            sub.add_argument('--mode', required=True, choices=['symbol'])
+            sub.add_argument('--output', required=True)
+            sub.add_argument('--symbol', required=True)
+            sub.add_argument('--limit', type=int, default=5)
+        if name == 'import-news-json':
+            sub.add_argument('--input', required=True)
+            sub.add_argument('--source', default='imported-json')
         if name in {'preview-order', 'submit-order', 'review-symbol'}:
             sub.add_argument('--symbol', required=True)
             sub.add_argument('--side', required=True, choices=['buy', 'sell'])
             sub.add_argument('--qty', required=True)
             sub.add_argument('--time-in-force', default='day')
             sub.add_argument('--asset-class', default='equity', choices=['equity', 'crypto', 'future'])
-        if name == 'review-watchlist':
+        if name in {'review-watchlist', 'export-review-report'}:
             sub.add_argument('--side', required=True, choices=['buy', 'sell'])
             sub.add_argument('--qty', required=True)
             sub.add_argument('--time-in-force', default='day')

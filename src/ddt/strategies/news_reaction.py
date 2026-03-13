@@ -55,6 +55,7 @@ class HeadlineReactionStrategy:
                         source_event_ids=[event.event_id],
                         asset_class=(event.asset_classes[0] if event.asset_classes else 'equity'),
                         quantity_hint='REVIEW_REQUIRED',
+                        created_at=event.created_at,
                         metadata={
                             'event_tags': event.metadata.get('event_tags', []),
                             'sentiment': event.metadata.get('sentiment', 'neutral'),
