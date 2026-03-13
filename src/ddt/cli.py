@@ -9,6 +9,7 @@ from .connectors.alpaca.client import AlpacaClient
 from .connectors.polygon.client import PolygonClient
 from .guardrails.orders import evaluate_order_guardrails, guardrail_config_from_settings
 from .models import NewsEvent
+from .news.normalize import normalize_polygon_news_item
 from .risk.rules import evaluate
 from .sample_data import sample_events
 from .store import event_store, proposal_store
@@ -127,20 +128,42 @@ def cmd_ingest_polygon_news(args: argparse.Namespace) -> int:
     store = event_store()
     count = 0
     for item in payload.get('results', []):
-        event = NewsEvent(
-            source='polygon',
-            headline=item.get('title', ''),
-            summary=item.get('description', ''),
-            url=item.get('article_url', ''),
-            tickers=item.get('tickers', []),
-            asset_classes=['equity'],
-            metadata={'publisher': item.get('publisher', {})},
-        )
+        event = normalize_polygon_news_item(item)
         store.append(event.to_dict())
         count += 1
     print(f'ingested {count} polygon news events')
     return 0
 
+
+
+
+def _event_from_row(row: dict) -> NewsEvent:
+    return NewsEvent(
+        source=row.get('source', ''),
+        headline=row.get('headline', ''),
+        summary=row.get('summary', ''),
+        url=row.get('url', ''),
+        tickers=row.get('tickers', []),
+        asset_classes=row.get('asset_classes', []),
+        event_id=row.get('event_id', ''),
+        created_at=row.get('created_at', ''),
+        metadata=row.get('metadata', {}),
+    )
+
+
+def cmd_build_proposals_from_events(args: argparse.Namespace) -> int:
+    rows = event_store().read_all()
+    events = [_event_from_row(row) for row in rows]
+    if args.symbol:
+        symbol = args.symbol.upper()
+        events = [event for event in events if symbol in [ticker.upper() for ticker in event.tickers]]
+    proposals = HeadlineReactionStrategy().generate(events)
+    store = proposal_store()
+    for proposal in proposals:
+        proposal.risk_notes = evaluate(proposal)
+        store.append(proposal.to_dict())
+        print(json.dumps(proposal.to_dict(), indent=2))
+    return 0
 
 def cmd_list_events(_: argparse.Namespace) -> int:
     for row in event_store().read_all():
@@ -202,6 +225,7 @@ def build_parser() -> argparse.ArgumentParser:
         'ingest-sample-news': cmd_ingest_sample_news,
         'ingest-polygon-news': cmd_ingest_polygon_news,
         'list-events': cmd_list_events,
+        'build-proposals-from-events': cmd_build_proposals_from_events,
         'propose-trades': cmd_propose_trades,
         'list-proposals': cmd_list_proposals,
         'approve': cmd_approve,
@@ -216,9 +240,11 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument('proposal_id')
         if name in {'market-quote'}:
             sub.add_argument('--symbol', required=True)
-        if name in {'ingest-polygon-news', 'review-market'}:
+        if name in {'ingest-polygon-news', 'review-market', 'build-proposals-from-events'}:
             sub.add_argument('--symbol', required=False, default=None)
             sub.add_argument('--limit', type=int, default=5)
+            if name == 'build-proposals-from-events':
+                pass
         if name in {'preview-order', 'submit-order'}:
             sub.add_argument('--symbol', required=True)
             sub.add_argument('--side', required=True, choices=['buy', 'sell'])
