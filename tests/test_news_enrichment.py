@@ -159,3 +159,70 @@ def test_cmd_review_symbol_prints_quote_news_events_and_proposals(tmp_path, monk
     assert 'NVDA wins partnership' in captured.out
     assert 'preview_only' in captured.out
     assert '100.0' in captured.out
+
+
+def test_normalize_polygon_news_assigns_source_score_from_publisher():
+    from ddt.news.normalize import normalize_polygon_news_item
+
+    item = {
+        'title': 'Company reports earnings beat',
+        'description': 'desc',
+        'article_url': 'https://example.com',
+        'tickers': ['AAPL'],
+        'publisher': {'name': 'The Motley Fool'},
+    }
+
+    event = normalize_polygon_news_item(item)
+
+    assert event.metadata['source_name'] == 'The Motley Fool'
+    assert event.metadata['source_score'] > 0.5
+
+
+def test_enriched_strategy_adjusts_confidence_from_source_score_and_event_tags():
+    event = NewsEvent(
+        source='polygon',
+        headline='NVDA wins partnership',
+        summary='synthetic',
+        url='https://example.com',
+        tickers=['NVDA'],
+        asset_classes=['equity'],
+        metadata={
+            'sentiment': 'positive',
+            'event_tags': ['earnings', 'partnership'],
+            'source_score': 0.9,
+        },
+    )
+
+    proposals = HeadlineReactionStrategy().generate([event])
+
+    assert len(proposals) == 1
+    assert proposals[0].confidence > 0.7
+
+
+def test_build_proposals_from_events_deduplicates_near_identical_proposals(tmp_path, monkeypatch, capsys):
+    from ddt import store as store_module
+    from ddt.cli import cmd_build_proposals_from_events
+
+    event_store = store_module.JsonlStore(tmp_path / 'events.jsonl')
+    proposal_store = store_module.JsonlStore(tmp_path / 'proposals.jsonl')
+    common = {
+        'source': 'polygon',
+        'summary': 'synthetic',
+        'url': 'https://example.com/nvda',
+        'tickers': ['NVDA'],
+        'asset_classes': ['equity'],
+        'metadata': {'sentiment': 'positive', 'event_tags': ['partnership'], 'source_score': 0.8},
+    }
+    event_store.append(NewsEvent(headline='NVDA wins partnership with cloud giant', **common).to_dict())
+    event_store.append(NewsEvent(headline='NVDA wins partnership with cloud giant', **common).to_dict())
+
+    monkeypatch.setattr('ddt.cli.event_store', lambda: event_store)
+    monkeypatch.setattr('ddt.cli.proposal_store', lambda: proposal_store)
+    args = type('Args', (), {'symbol': 'NVDA', 'limit': 5})()
+
+    exit_code = cmd_build_proposals_from_events(args)
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    rows = proposal_store.read_all()
+    assert len(rows) == 1

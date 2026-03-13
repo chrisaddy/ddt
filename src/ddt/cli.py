@@ -144,7 +144,20 @@ def _build_proposals(events: list[NewsEvent], symbol: str | None = None) -> list
     if symbol:
         symbol = symbol.upper()
         proposals = [proposal for proposal in proposals if proposal.symbol.upper() == symbol]
-    return proposals
+    return _dedupe_proposals(proposals)
+
+
+
+def _dedupe_proposals(proposals: list) -> list:
+    deduped = []
+    seen = set()
+    for proposal in proposals:
+        key = (proposal.symbol.upper(), proposal.side.lower(), proposal.metadata.get('dedupe_key', proposal.rationale.lower()))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(proposal)
+    return deduped
 
 def _event_from_row(row: dict) -> NewsEvent:
     return NewsEvent(
