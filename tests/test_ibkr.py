@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from ddt.cli import cmd_ibkr_accounts, cmd_ibkr_search_contracts, cmd_ibkr_status, cmd_ibkr_summary, cmd_ibkr_positions, cmd_ibkr_orders, cmd_ibkr_market_snapshot, cmd_ibkr_contract_details
+from ddt.cli import cmd_ibkr_accounts, cmd_ibkr_search_contracts, cmd_ibkr_status, cmd_ibkr_summary, cmd_ibkr_positions, cmd_ibkr_orders, cmd_ibkr_market_snapshot, cmd_ibkr_contract_details, cmd_ibkr_review_future
 from ddt.config import Settings, validate_ibkr_settings
 from ddt.connectors.ibkr.client import IbkrClient
 
@@ -214,3 +214,31 @@ def test_cmd_ibkr_contract_details_prints_details(capsys, monkeypatch):
     captured = capsys.readouterr()
     assert exit_code == 0
     assert 'CL' in captured.out
+
+
+def test_cmd_ibkr_review_future_prints_search_details_snapshot_and_account(capsys, monkeypatch):
+    class StubClient:
+        def search_contracts(self, symbol):
+            assert symbol == 'CL'
+            return [{'conid': 173418084, 'symbol': 'CL', 'description': 'Crude Oil Future'}]
+        def contract_details(self, conid):
+            assert conid == '173418084'
+            return [{'conid': 173418084, 'symbol': 'CL', 'maturityDate': '202504'}]
+        def market_snapshot(self, conid):
+            assert conid == '173418084'
+            return [{'conid': 173418084, '31': '80.25'}]
+        def account_summary(self):
+            return {'accounts': [{'accountId': 'DU1234567'}]}
+        def positions(self):
+            return []
+        def open_orders(self):
+            return {'orders': []}
+
+    monkeypatch.setattr('ddt.cli._ibkr_client', lambda: StubClient())
+    args = type('Args', (), {'symbol': 'CL', 'conid': '173418084'})()
+    exit_code = cmd_ibkr_review_future(args)
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert 'Crude Oil Future' in captured.out
+    assert '80.25' in captured.out
+    assert 'DU1234567' in captured.out

@@ -102,6 +102,23 @@ def cmd_ibkr_market_snapshot(args: argparse.Namespace) -> int:
     print(json.dumps(_ibkr_client().market_snapshot(args.conid), indent=2))
     return 0
 
+
+def cmd_ibkr_review_future(args: argparse.Namespace) -> int:
+    client = _ibkr_client()
+    search = client.search_contracts(args.symbol)
+    details = client.contract_details(args.conid)
+    snapshot = client.market_snapshot(args.conid)
+    summary = {
+        'search': search,
+        'details': details,
+        'snapshot': snapshot,
+        'account_summary': client.account_summary(),
+        'positions': client.positions(),
+        'open_orders': client.open_orders(),
+    }
+    print(json.dumps(summary, indent=2))
+    return 0
+
 def cmd_ibkr_status(_: argparse.Namespace) -> int:
     print(json.dumps({'ibkr': _ibkr_client().config_summary()}, indent=2))
     return 0
@@ -470,6 +487,13 @@ def cmd_approve(args: argparse.Namespace) -> int:
 
 def _render_report_markdown(payload: dict) -> str:
     lines = ['# ddt review report', '']
+    if 'watchlist' in payload:
+        lines.append('## Watchlist')
+        for item in payload.get('watchlist', []):
+            lines.append(f'- {item.get("symbol")}: proposals={item.get("proposal_count")}')
+            for note in item.get('policy_notes', []):
+                lines.append(f'  - {note}')
+        return '\n'.join(lines) + '\n'
     symbol = payload.get('symbol')
     if symbol:
         lines.append(f'- Symbol: {symbol}')
@@ -484,8 +508,7 @@ def _render_report_markdown(payload: dict) -> str:
         lines.append('- Guardrails:')
         for note in notes:
             lines.append(f'  - {note}')
-    return "\n".join(lines) + "\n"
-
+    return '\n'.join(lines) + '\n'
 
 def _render_report_html(payload: dict) -> str:
     md = _render_report_markdown(payload)
@@ -494,6 +517,8 @@ def _render_report_html(payload: dict) -> str:
 def cmd_export_review_report(args: argparse.Namespace) -> int:
     if args.mode == 'symbol':
         payload = _review_symbol_payload(args)
+    elif args.mode == 'watchlist':
+        payload = json.loads(_capture_watchlist_json(args))
     else:
         payload = {'watchlist': []}
     output = Path(args.output)
@@ -537,6 +562,7 @@ def build_parser() -> argparse.ArgumentParser:
         'ibkr-search-contracts': cmd_ibkr_search_contracts,
         'ibkr-contract-details': cmd_ibkr_contract_details,
         'ibkr-market-snapshot': cmd_ibkr_market_snapshot,
+        'ibkr-review-future': cmd_ibkr_review_future,
         'account': cmd_account,
         'positions': cmd_positions,
         'orders': cmd_orders,
@@ -567,6 +593,9 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument('--symbol', required=True)
         if name in {'ibkr-contract-details', 'ibkr-market-snapshot'}:
             sub.add_argument('--conid', required=True)
+        if name == 'ibkr-review-future':
+            sub.add_argument('--symbol', required=True)
+            sub.add_argument('--conid', required=True)
         if name in {'ingest-polygon-news', 'review-market', 'build-proposals-from-events'}:
             sub.add_argument('--symbol', required=False, default=None)
             sub.add_argument('--limit', type=int, default=5)
@@ -576,10 +605,11 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument('--symbols', required=True)
             sub.add_argument('--limit', type=int, default=5)
         if name == 'export-review-report':
-            sub.add_argument('--mode', required=True, choices=['symbol'])
+            sub.add_argument('--mode', required=True, choices=['symbol', 'watchlist'])
             sub.add_argument('--output', required=True)
             sub.add_argument('--format', choices=['json', 'markdown', 'html'], default='json')
-            sub.add_argument('--symbol', required=True)
+            sub.add_argument('--symbol', required=False)
+            sub.add_argument('--symbols', required=False)
             sub.add_argument('--limit', type=int, default=5)
         if name == 'import-news-json':
             sub.add_argument('--input', required=True)

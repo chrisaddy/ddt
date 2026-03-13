@@ -651,3 +651,20 @@ def test_export_review_report_writes_html_file(tmp_path, monkeypatch, capsys):
     assert 'nvda' in body
     assert 'market is closed' in body
     assert 'wrote report' in captured.out.lower()
+
+
+def test_export_review_report_writes_watchlist_markdown_file(tmp_path, monkeypatch, capsys):
+    from ddt.cli import cmd_export_review_report
+
+    monkeypatch.setattr('ddt.cli._capture_watchlist_json', lambda args: '{"watchlist":[{"symbol":"NVDA","proposal_count":2,"policy_notes":["cooldown"]},{"symbol":"AAPL","proposal_count":0,"policy_notes":[]}]}')
+    output = tmp_path / 'watchlist.md'
+    args = type('Args', (), {'mode': 'watchlist', 'format': 'markdown', 'symbols': 'NVDA,AAPL', 'limit': 5, 'side': 'buy', 'qty': '1', 'time_in_force': 'day', 'asset_class': 'equity', 'output': str(output)})()
+
+    exit_code = cmd_export_review_report(args)
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    body = output.read_text()
+    assert '# ddt review report' in body.lower()
+    assert 'NVDA' in body
+    assert 'cooldown' in body
+    assert 'wrote report' in captured.out.lower()
