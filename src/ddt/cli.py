@@ -9,7 +9,7 @@ from .connectors.alpaca.client import AlpacaClient
 from .connectors.polygon.client import PolygonClient
 from .guardrails.orders import evaluate_order_guardrails, guardrail_config_from_settings
 from .models import NewsEvent
-from .news.normalize import normalize_polygon_news_item
+from .news.normalize import infer_event_tags, infer_sentiment, normalize_polygon_news_item, score_publisher, dedupe_key
 from .risk.rules import evaluate
 from .sample_data import sample_events
 from .store import event_store, proposal_store
@@ -139,6 +139,37 @@ def cmd_ingest_polygon_news(args: argparse.Namespace) -> int:
 
 
 
+
+
+def _refresh_event_metadata(event: NewsEvent) -> NewsEvent:
+    publisher = event.metadata.get('publisher', {}) or {}
+    source_name = publisher.get('name', event.metadata.get('source_name', 'unknown'))
+    metadata = dict(event.metadata)
+    metadata['source_name'] = source_name
+    metadata['source_score'] = score_publisher(source_name)
+    metadata['sentiment'] = infer_sentiment(event.headline, metadata.get('insights'))
+    metadata['event_tags'] = infer_event_tags(event.headline, metadata.get('keywords'))
+    metadata['dedupe_key'] = dedupe_key(event.headline)
+    event.metadata = metadata
+    return event
+
+
+def cmd_backfill_event_metadata(_: argparse.Namespace) -> int:
+    store = event_store()
+    rows = store.read_all()
+    updated_rows = []
+    count = 0
+    for row in rows:
+        event = _event_from_row(row)
+        before = dict(event.metadata)
+        event = _refresh_event_metadata(event)
+        updated_rows.append(event.to_dict())
+        if event.metadata != before:
+            count += 1
+    store.rewrite(updated_rows)
+    print(f'updated {count} events')
+    return 0
+
 def _build_proposals(events: list[NewsEvent], symbol: str | None = None) -> list:
     proposals = HeadlineReactionStrategy().generate(events)
     if symbol:
@@ -219,6 +250,7 @@ def cmd_review_symbol(args: argparse.Namespace) -> int:
     symbol = args.symbol.upper()
     matching_events = [event for event in events if symbol in [ticker.upper() for ticker in event.tickers]]
     proposals = _build_proposals(matching_events, symbol=symbol)
+    ranked_proposals = sorted([proposal.to_dict() for proposal in proposals], key=lambda p: p.get('confidence', 0), reverse=True)
     preview = _guarded_preview(args)
     summary = {
         'symbol': symbol,
@@ -226,6 +258,8 @@ def cmd_review_symbol(args: argparse.Namespace) -> int:
         'recent_news': _polygon_client().get_news(symbol, limit=args.limit).get('results', []),
         'stored_events': [event.to_dict() for event in matching_events],
         'generated_proposals': [proposal.to_dict() for proposal in proposals],
+        'ranked_proposals': ranked_proposals,
+        'top_proposal': ranked_proposals[0] if ranked_proposals else None,
         'preview': preview,
     }
     print(json.dumps(summary, indent=2))
@@ -266,6 +300,7 @@ def build_parser() -> argparse.ArgumentParser:
         'market-quote': cmd_market_quote,
         'ingest-sample-news': cmd_ingest_sample_news,
         'ingest-polygon-news': cmd_ingest_polygon_news,
+        'backfill-event-metadata': cmd_backfill_event_metadata,
         'list-events': cmd_list_events,
         'build-proposals-from-events': cmd_build_proposals_from_events,
         'propose-trades': cmd_propose_trades,
