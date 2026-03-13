@@ -607,3 +607,47 @@ def test_cmd_run_session_executes_watchlist_flow_and_writes_report(tmp_path, mon
     assert payload['watchlist'][0]['symbol'] in {'NVDA', 'AAPL'}
     assert proposal_store.read_all()
     assert event_store.read_all()
+
+
+def test_export_review_report_writes_markdown_file(tmp_path, monkeypatch, capsys):
+    from ddt.cli import cmd_export_review_report
+
+    monkeypatch.setattr('ddt.cli._review_symbol_payload', lambda args: {
+        'symbol': 'NVDA',
+        'top_proposal': {'symbol': 'NVDA', 'side': 'buy', 'confidence': 0.7, 'metadata': {'ranking_score': 0.75}},
+        'preview': {'guardrail_notes': ['market is closed']},
+    })
+    output = tmp_path / 'report.md'
+    args = type('Args', (), {'mode': 'symbol', 'format': 'markdown', 'symbol': 'NVDA', 'limit': 5, 'side': 'buy', 'qty': '1', 'time_in_force': 'day', 'asset_class': 'equity', 'output': str(output)})()
+
+    exit_code = cmd_export_review_report(args)
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert output.exists()
+    body = output.read_text()
+    assert '# ddt review report' in body.lower()
+    assert 'NVDA' in body
+    assert 'market is closed' in body
+    assert 'wrote report' in captured.out.lower()
+
+
+def test_export_review_report_writes_html_file(tmp_path, monkeypatch, capsys):
+    from ddt.cli import cmd_export_review_report
+
+    monkeypatch.setattr('ddt.cli._review_symbol_payload', lambda args: {
+        'symbol': 'NVDA',
+        'top_proposal': {'symbol': 'NVDA', 'side': 'buy', 'confidence': 0.7, 'metadata': {'ranking_score': 0.75}},
+        'preview': {'guardrail_notes': ['market is closed']},
+    })
+    output = tmp_path / 'report.html'
+    args = type('Args', (), {'mode': 'symbol', 'format': 'html', 'symbol': 'NVDA', 'limit': 5, 'side': 'buy', 'qty': '1', 'time_in_force': 'day', 'asset_class': 'equity', 'output': str(output)})()
+
+    exit_code = cmd_export_review_report(args)
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert output.exists()
+    body = output.read_text().lower()
+    assert '<html' in body
+    assert 'nvda' in body
+    assert 'market is closed' in body
+    assert 'wrote report' in captured.out.lower()

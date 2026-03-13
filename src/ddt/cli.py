@@ -466,6 +466,31 @@ def cmd_approve(args: argparse.Namespace) -> int:
 
 
 
+
+
+def _render_report_markdown(payload: dict) -> str:
+    lines = ['# ddt review report', '']
+    symbol = payload.get('symbol')
+    if symbol:
+        lines.append(f'- Symbol: {symbol}')
+    top = payload.get('top_proposal') or {}
+    if top:
+        lines.append(f'- Top proposal: {top.get("symbol")} {top.get("side")}')
+        lines.append(f'- Confidence: {top.get("confidence")}')
+        lines.append(f'- Ranking score: {(top.get("metadata") or {}).get("ranking_score")}')
+    preview = payload.get('preview') or {}
+    notes = preview.get('guardrail_notes') or []
+    if notes:
+        lines.append('- Guardrails:')
+        for note in notes:
+            lines.append(f'  - {note}')
+    return "\n".join(lines) + "\n"
+
+
+def _render_report_html(payload: dict) -> str:
+    md = _render_report_markdown(payload)
+    body = md.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace("\n", '<br/>\n')
+    return f'<html><body><h1>ddt review report</h1><div>{body}</div></body></html>\n'
 def cmd_export_review_report(args: argparse.Namespace) -> int:
     if args.mode == 'symbol':
         payload = _review_symbol_payload(args)
@@ -473,7 +498,14 @@ def cmd_export_review_report(args: argparse.Namespace) -> int:
         payload = {'watchlist': []}
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+    fmt = getattr(args, 'format', 'json')
+    if fmt == 'markdown':
+        content = _render_report_markdown(payload)
+    elif fmt == 'html':
+        content = _render_report_html(payload)
+    else:
+        content = json.dumps(payload, indent=2)
+    output.write_text(content, encoding='utf-8')
     print(f'wrote report to {output}')
     return 0
 
@@ -546,6 +578,7 @@ def build_parser() -> argparse.ArgumentParser:
         if name == 'export-review-report':
             sub.add_argument('--mode', required=True, choices=['symbol'])
             sub.add_argument('--output', required=True)
+            sub.add_argument('--format', choices=['json', 'markdown', 'html'], default='json')
             sub.add_argument('--symbol', required=True)
             sub.add_argument('--limit', type=int, default=5)
         if name == 'import-news-json':
