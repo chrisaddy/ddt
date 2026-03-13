@@ -37,7 +37,15 @@ class IbkrClient:
 
     def _get(self, path: str, params: dict[str, Any] | None = None):
         assert self.base_url is not None
-        query = f'?{urlencode(params)}' if params else ''
+        if params:
+            if path == '/iserver/marketdata/snapshot' and 'fields' in params:
+                safe_params = dict(params)
+                fields = safe_params.pop('fields')
+                query = '?' + urlencode(safe_params) + f'&fields={fields}'
+            else:
+                query = f'?{urlencode(params)}'
+        else:
+            query = ''
         request = Request(f'{self.base_url}{path}{query}', headers={'Accept': 'application/json'}, method='GET')
         response = self.transport(request, timeout=10, context=self._ssl_context())
         return json.loads(response.read().decode('utf-8'))
@@ -52,5 +60,22 @@ class IbkrClient:
     def list_accounts(self):
         return self._get('/portfolio/accounts')
 
+    def account_summary(self):
+        assert self.account_id is not None
+        return self._get(f'/portfolio/{self.account_id}/summary')
+
+    def positions(self):
+        assert self.account_id is not None
+        return self._get(f'/portfolio/{self.account_id}/positions/0')
+
+    def open_orders(self):
+        return self._get('/iserver/account/orders')
+
     def search_contracts(self, symbol: str):
         return self._get('/iserver/secdef/search', params={'symbol': symbol.upper()})
+
+    def contract_details(self, conid: str):
+        return self._get('/iserver/secdef/info', params={'conid': conid})
+
+    def market_snapshot(self, conid: str):
+        return self._get('/iserver/marketdata/snapshot', params={'conids': conid, 'fields': '31,84,85,86,88'})

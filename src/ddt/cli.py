@@ -76,6 +76,32 @@ def _guarded_preview(args: argparse.Namespace) -> dict:
 
 
 
+
+
+def cmd_ibkr_summary(_: argparse.Namespace) -> int:
+    print(json.dumps(_ibkr_client().account_summary(), indent=2))
+    return 0
+
+
+def cmd_ibkr_positions(_: argparse.Namespace) -> int:
+    print(json.dumps(_ibkr_client().positions(), indent=2))
+    return 0
+
+
+def cmd_ibkr_orders(_: argparse.Namespace) -> int:
+    print(json.dumps(_ibkr_client().open_orders(), indent=2))
+    return 0
+
+
+def cmd_ibkr_contract_details(args: argparse.Namespace) -> int:
+    print(json.dumps(_ibkr_client().contract_details(args.conid), indent=2))
+    return 0
+
+
+def cmd_ibkr_market_snapshot(args: argparse.Namespace) -> int:
+    print(json.dumps(_ibkr_client().market_snapshot(args.conid), indent=2))
+    return 0
+
 def cmd_ibkr_status(_: argparse.Namespace) -> int:
     print(json.dumps({'ibkr': _ibkr_client().config_summary()}, indent=2))
     return 0
@@ -432,7 +458,12 @@ def build_parser() -> argparse.ArgumentParser:
         'status': cmd_status,
         'ibkr-status': cmd_ibkr_status,
         'ibkr-accounts': cmd_ibkr_accounts,
+        'ibkr-summary': cmd_ibkr_summary,
+        'ibkr-positions': cmd_ibkr_positions,
+        'ibkr-orders': cmd_ibkr_orders,
         'ibkr-search-contracts': cmd_ibkr_search_contracts,
+        'ibkr-contract-details': cmd_ibkr_contract_details,
+        'ibkr-market-snapshot': cmd_ibkr_market_snapshot,
         'account': cmd_account,
         'positions': cmd_positions,
         'orders': cmd_orders,
@@ -460,6 +491,8 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument('proposal_id')
         if name in {'market-quote', 'ibkr-search-contracts'}:
             sub.add_argument('--symbol', required=True)
+        if name in {'ibkr-contract-details', 'ibkr-market-snapshot'}:
+            sub.add_argument('--conid', required=True)
         if name in {'ingest-polygon-news', 'review-market', 'build-proposals-from-events'}:
             sub.add_argument('--symbol', required=False, default=None)
             sub.add_argument('--limit', type=int, default=5)

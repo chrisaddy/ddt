@@ -51,3 +51,10 @@ IBKR Client Portal setup
   - PYTHONPATH=src python3 -m ddt.cli ibkr-status
   - PYTHONPATH=src python3 -m ddt.cli ibkr-accounts
   - PYTHONPATH=src python3 -m ddt.cli ibkr-search-contracts --symbol CL
+
+Additional IBKR commands
+- PYTHONPATH=src python3 -m ddt.cli ibkr-summary
+- PYTHONPATH=src python3 -m ddt.cli ibkr-positions
+- PYTHONPATH=src python3 -m ddt.cli ibkr-orders
+- PYTHONPATH=src python3 -m ddt.cli ibkr-contract-details --conid 173418084
+- PYTHONPATH=src python3 -m ddt.cli ibkr-market-snapshot --conid 173418084
