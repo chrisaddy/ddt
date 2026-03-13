@@ -137,6 +137,15 @@ def cmd_ingest_polygon_news(args: argparse.Namespace) -> int:
 
 
 
+
+
+def _build_proposals(events: list[NewsEvent], symbol: str | None = None) -> list:
+    proposals = HeadlineReactionStrategy().generate(events)
+    if symbol:
+        symbol = symbol.upper()
+        proposals = [proposal for proposal in proposals if proposal.symbol.upper() == symbol]
+    return proposals
+
 def _event_from_row(row: dict) -> NewsEvent:
     return NewsEvent(
         source=row.get('source', ''),
@@ -157,7 +166,7 @@ def cmd_build_proposals_from_events(args: argparse.Namespace) -> int:
     if args.symbol:
         symbol = args.symbol.upper()
         events = [event for event in events if symbol in [ticker.upper() for ticker in event.tickers]]
-    proposals = HeadlineReactionStrategy().generate(events)
+    proposals = _build_proposals(events, symbol=args.symbol)
     store = proposal_store()
     for proposal in proposals:
         proposal.risk_notes = evaluate(proposal)
@@ -188,6 +197,26 @@ def cmd_list_proposals(_: argparse.Namespace) -> int:
         print(json.dumps(row, indent=2))
     return 0
 
+
+
+
+def cmd_review_symbol(args: argparse.Namespace) -> int:
+    rows = event_store().read_all()
+    events = [_event_from_row(row) for row in rows]
+    symbol = args.symbol.upper()
+    matching_events = [event for event in events if symbol in [ticker.upper() for ticker in event.tickers]]
+    proposals = _build_proposals(matching_events, symbol=symbol)
+    preview = _guarded_preview(args)
+    summary = {
+        'symbol': symbol,
+        'quote': _polygon_client().get_last_trade(symbol),
+        'recent_news': _polygon_client().get_news(symbol, limit=args.limit).get('results', []),
+        'stored_events': [event.to_dict() for event in matching_events],
+        'generated_proposals': [proposal.to_dict() for proposal in proposals],
+        'preview': preview,
+    }
+    print(json.dumps(summary, indent=2))
+    return 0
 
 def cmd_review_market(args: argparse.Namespace) -> int:
     alpaca = _alpaca_client()
@@ -232,6 +261,7 @@ def build_parser() -> argparse.ArgumentParser:
         'preview-order': cmd_preview_order,
         'submit-order': cmd_submit_order,
         'review-market': cmd_review_market,
+        'review-symbol': cmd_review_symbol,
     }
     for name, fn in simple_commands.items():
         sub = subparsers.add_parser(name)
@@ -243,9 +273,9 @@ def build_parser() -> argparse.ArgumentParser:
         if name in {'ingest-polygon-news', 'review-market', 'build-proposals-from-events'}:
             sub.add_argument('--symbol', required=False, default=None)
             sub.add_argument('--limit', type=int, default=5)
-            if name == 'build-proposals-from-events':
-                pass
-        if name in {'preview-order', 'submit-order'}:
+        if name == 'review-symbol':
+            sub.add_argument('--limit', type=int, default=5)
+        if name in {'preview-order', 'submit-order', 'review-symbol'}:
             sub.add_argument('--symbol', required=True)
             sub.add_argument('--side', required=True, choices=['buy', 'sell'])
             sub.add_argument('--qty', required=True)

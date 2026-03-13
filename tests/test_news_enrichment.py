@@ -79,3 +79,83 @@ def test_build_proposals_from_stored_events_filters_by_symbol(tmp_path, monkeypa
     assert len(rows) == 1
     assert rows[0]['symbol'] == 'NVDA'
     assert rows[0]['side'] == 'buy'
+
+
+def test_build_proposals_from_stored_events_only_emits_requested_symbol(tmp_path, monkeypatch, capsys):
+    from ddt import store as store_module
+    from ddt.cli import cmd_build_proposals_from_events
+
+    event_store = store_module.JsonlStore(tmp_path / 'events.jsonl')
+    proposal_store = store_module.JsonlStore(tmp_path / 'proposals.jsonl')
+    event_store.append(NewsEvent(
+        source='polygon',
+        headline='NVDA and VCIG announce AI partnership',
+        summary='synthetic',
+        url='https://example.com/multi',
+        tickers=['NVDA', 'VCIG'],
+        asset_classes=['equity'],
+        metadata={'sentiment': 'positive', 'event_tags': ['partnership']},
+    ).to_dict())
+
+    monkeypatch.setattr('ddt.cli.event_store', lambda: event_store)
+    monkeypatch.setattr('ddt.cli.proposal_store', lambda: proposal_store)
+    args = type('Args', (), {'symbol': 'NVDA', 'limit': 5})()
+
+    exit_code = cmd_build_proposals_from_events(args)
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert '"symbol": "NVDA"' in captured.out
+    assert '"symbol": "VCIG"' not in captured.out
+    rows = proposal_store.read_all()
+    assert len(rows) == 1
+    assert rows[0]['symbol'] == 'NVDA'
+
+
+def test_cmd_review_symbol_prints_quote_news_events_and_proposals(tmp_path, monkeypatch, capsys):
+    from ddt import store as store_module
+    from ddt.cli import cmd_review_symbol
+
+    event_store = store_module.JsonlStore(tmp_path / 'events.jsonl')
+    proposal_store = store_module.JsonlStore(tmp_path / 'proposals.jsonl')
+    event_store.append(NewsEvent(
+        source='polygon',
+        headline='NVDA wins partnership',
+        summary='synthetic',
+        url='https://example.com/nvda',
+        tickers=['NVDA'],
+        asset_classes=['equity'],
+        metadata={'sentiment': 'positive', 'event_tags': ['partnership']},
+    ).to_dict())
+
+    class StubAlpaca:
+        def get_account(self):
+            return {'status': 'ACTIVE', 'cash': '450'}
+        def get_positions(self):
+            return []
+        def get_open_orders(self):
+            return []
+        def get_clock(self):
+            return {'is_open': True}
+        def preview_order(self, symbol, side, qty, time_in_force, asset_class='equity'):
+            return {'symbol': symbol, 'side': side, 'qty': qty, 'asset_class': asset_class, 'status': 'preview_only'}
+
+    class StubPolygon:
+        def get_last_trade(self, symbol):
+            return {'results': {'T': symbol, 'p': 100.0}}
+        def get_news(self, symbol=None, limit=5):
+            return {'results': [{'title': 'NVDA wins partnership', 'tickers': ['NVDA']}]}
+
+    monkeypatch.setattr('ddt.cli._alpaca_client', lambda: StubAlpaca())
+    monkeypatch.setattr('ddt.cli._polygon_client', lambda: StubPolygon())
+    monkeypatch.setattr('ddt.cli.event_store', lambda: event_store)
+    monkeypatch.setattr('ddt.cli.proposal_store', lambda: proposal_store)
+    args = type('Args', (), {'symbol': 'NVDA', 'limit': 5, 'side': 'buy', 'qty': '1', 'time_in_force': 'day', 'asset_class': 'equity'})()
+
+    exit_code = cmd_review_symbol(args)
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert 'NVDA wins partnership' in captured.out
+    assert 'preview_only' in captured.out
+    assert '100.0' in captured.out
