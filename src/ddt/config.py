@@ -1,9 +1,18 @@
+"""Application configuration backed by environment variables.
+
+All settings are read at import time via environment variable helpers
+and exposed through the frozen :class:`Settings` dataclass.  Validation
+helpers check that required credentials are present before a connector
+is used.
+"""
+
 from dataclasses import dataclass
 import os
 from pathlib import Path
 
 
 def _first_env(*names: str, default: str = "") -> str:
+    """Return the first non-empty value from the given env var *names*."""
     for name in names:
         value = os.getenv(name)
         if value:
@@ -12,6 +21,7 @@ def _first_env(*names: str, default: str = "") -> str:
 
 
 def _env_bool(name: str, default: bool) -> bool:
+    """Read an env var as a boolean (truthy: ``1/true/yes/on``)."""
     value = os.getenv(name)
     if value is None:
         return default
@@ -19,6 +29,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _env_float(name: str, default: float) -> float:
+    """Read an env var as a float, returning *default* if unset or empty."""
     value = os.getenv(name)
     if value is None or value == '':
         return default
@@ -26,12 +37,14 @@ def _env_float(name: str, default: float) -> float:
 
 
 def _env_list(name: str) -> list[str]:
+    """Read a comma-separated env var into an upper-cased list of strings."""
     value = os.getenv(name, '')
     return [item.strip().upper() for item in value.split(',') if item.strip()]
 
 
 @dataclass(frozen=True)
 class Settings:
+    """Immutable application settings populated from environment variables."""
     repo_root: Path = Path(__file__).resolve().parents[2]
     state_dir: Path = Path(__file__).resolve().parents[2] / 'state'
     alpaca_api_key: str = _first_env('ALPACA_API_KEY', 'ALPACA_KEY_ID')
@@ -53,12 +66,14 @@ class Settings:
 
 
 def get_settings() -> Settings:
+    """Create a :class:`Settings` instance and ensure the state directory exists."""
     settings = Settings()
     settings.state_dir.mkdir(parents=True, exist_ok=True)
     return settings
 
 
 def validate_alpaca_settings(settings: Settings) -> Settings:
+    """Raise :class:`ValueError` if required Alpaca credentials are missing."""
     missing = []
     if not settings.alpaca_api_key:
         missing.append('ALPACA_API_KEY/ALPACA_KEY_ID')
@@ -72,6 +87,7 @@ def validate_alpaca_settings(settings: Settings) -> Settings:
 
 
 def validate_polygon_settings(settings: Settings) -> Settings:
+    """Raise :class:`ValueError` if required Polygon credentials are missing."""
     missing = []
     if not settings.polygon_api_key:
         missing.append('POLYGON_API_KEY')
@@ -83,6 +99,7 @@ def validate_polygon_settings(settings: Settings) -> Settings:
 
 
 def validate_ibkr_settings(settings: Settings) -> Settings:
+    """Raise :class:`ValueError` if required IBKR credentials are missing."""
     missing = []
     if not settings.ibkr_base_url:
         missing.append('IBKR_BASE_URL')

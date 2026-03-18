@@ -1,3 +1,9 @@
+"""Polygon.io market-data connector.
+
+Provides last-trade lookups (with a previous-close fallback) and
+news retrieval from the Polygon REST API.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,6 +20,7 @@ Transport = Callable[..., Any]
 
 @dataclass
 class PolygonClient:
+    """HTTP client for the Polygon.io REST API."""
     base_url: str | None = None
     api_key: str | None = None
     transport: Optional[Transport] = None
@@ -37,6 +44,7 @@ class PolygonClient:
         return json.loads(response.read().decode('utf-8'))
 
     def get_last_trade(self, symbol: str) -> dict[str, Any]:
+        """Fetch the last trade for *symbol*, falling back to previous close."""
         symbol = symbol.upper()
         try:
             return self._get(f'/v2/last/trade/{symbol}')
@@ -49,6 +57,7 @@ class PolygonClient:
             return {'results': {'T': symbol, 'p': close_price, 'source': 'prev_close_fallback'}}
 
     def get_news(self, symbol: str | None = None, limit: int = 10) -> dict[str, Any]:
+        """Fetch recent news articles, optionally filtered by *symbol*."""
         params = {'limit': limit}
         if symbol:
             params['ticker'] = symbol.upper()

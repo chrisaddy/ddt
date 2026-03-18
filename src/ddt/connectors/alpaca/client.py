@@ -1,3 +1,9 @@
+"""Alpaca broker connector.
+
+Provides a lightweight HTTP client for the Alpaca Trading API, covering
+account info, positions, orders, and market clock queries.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,6 +19,7 @@ Transport = Callable[..., Any]
 
 @dataclass
 class AlpacaClient:
+    """HTTP client for the Alpaca Trading and Data APIs."""
     base_url: str | None = None
     api_key: str | None = None
     api_secret: str | None = None
@@ -30,6 +37,7 @@ class AlpacaClient:
             self.transport = urlopen
 
     def config_summary(self) -> Dict[str, str]:
+        """Return a safe-to-log summary of the current configuration."""
         return {
             'base_url': self.base_url or '',
             'api_key_present': str(bool(self.api_key)),
@@ -59,19 +67,24 @@ class AlpacaClient:
         return self._request('POST', path, payload)
 
     def get_account(self) -> Dict[str, Any]:
+        """Fetch the current account details."""
         return self._get('/v2/account')
 
     def get_positions(self) -> list[Dict[str, Any]]:
+        """Fetch all open positions."""
         return self._get('/v2/positions')
 
     def get_open_orders(self) -> list[Dict[str, Any]]:
+        """Fetch all open orders, most recent first."""
         query = urlencode({'status': 'open', 'direction': 'desc'})
         return self._get(f'/v2/orders?{query}')
 
     def get_clock(self) -> Dict[str, Any]:
+        """Fetch the current market clock (open/close times, is_open)."""
         return self._get('/v2/clock')
 
     def preview_order(self, symbol: str, side: str, qty: str, time_in_force: str, asset_class: str = 'equity') -> Dict[str, Any]:
+        """Build a local order preview dict (not submitted to the broker)."""
         return {
             'symbol': symbol.upper(),
             'side': side,
@@ -87,6 +100,7 @@ class AlpacaClient:
         }
 
     def submit_order(self, symbol: str, side: str, qty: str, time_in_force: str) -> Dict[str, Any]:
+        """Submit a market order to Alpaca."""
         payload = {
             'symbol': symbol.upper(),
             'side': side,
