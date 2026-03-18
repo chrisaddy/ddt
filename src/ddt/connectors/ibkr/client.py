@@ -1,3 +1,9 @@
+"""Interactive Brokers Client Portal connector.
+
+Wraps the IBKR Client Portal Gateway REST API for account, position,
+order, contract, and market-data operations.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,6 +20,7 @@ Transport = Callable[..., Any]
 
 @dataclass
 class IbkrClient:
+    """HTTP client for the IBKR Client Portal Gateway API."""
     base_url: str | None = None
     account_id: str | None = None
     transport: Optional[Transport] = None
@@ -51,6 +58,7 @@ class IbkrClient:
         return json.loads(response.read().decode('utf-8'))
 
     def config_summary(self) -> dict[str, str]:
+        """Return a safe-to-log summary of the current configuration."""
         return {
             'base_url': self.base_url or '',
             'account_id': self.account_id or '',
@@ -58,24 +66,31 @@ class IbkrClient:
         }
 
     def list_accounts(self):
+        """List all accounts accessible through the gateway."""
         return self._get('/portfolio/accounts')
 
     def account_summary(self):
+        """Fetch the portfolio summary for the configured account."""
         assert self.account_id is not None
         return self._get(f'/portfolio/{self.account_id}/summary')
 
     def positions(self):
+        """Fetch open positions for the configured account."""
         assert self.account_id is not None
         return self._get(f'/portfolio/{self.account_id}/positions/0')
 
     def open_orders(self):
+        """Fetch all open orders."""
         return self._get('/iserver/account/orders')
 
     def search_contracts(self, symbol: str):
+        """Search for contracts matching *symbol*."""
         return self._get('/iserver/secdef/search', params={'symbol': symbol.upper()})
 
     def contract_details(self, conid: str):
+        """Fetch security definition details for a contract ID."""
         return self._get('/iserver/secdef/info', params={'conid': conid})
 
     def market_snapshot(self, conid: str):
+        """Fetch a real-time market data snapshot for a contract ID."""
         return self._get('/iserver/marketdata/snapshot', params={'conids': conid, 'fields': '31,84,85,86,88'})
