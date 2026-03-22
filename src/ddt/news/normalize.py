@@ -1,3 +1,5 @@
+"""Headline analysis: sentiment inference, event tagging, publisher scoring, and Polygon normalization."""
+
 from __future__ import annotations
 
 import re
@@ -28,6 +30,7 @@ PUBLISHER_SCORES = {
 
 
 def infer_sentiment(title: str, insights: list[dict] | None = None) -> str:
+    """Classify a headline as ``positive``, ``negative``, or ``neutral``."""
     if insights:
         sentiments = [str(item.get('sentiment', '')).lower() for item in insights if item.get('sentiment')]
         if 'positive' in sentiments:
@@ -43,6 +46,7 @@ def infer_sentiment(title: str, insights: list[dict] | None = None) -> str:
 
 
 def infer_event_tags(title: str, keywords: list[str] | None = None) -> list[str]:
+    """Extract semantic tags (e.g. ``earnings``, ``mna``) from a headline."""
     lowered = title.lower()
     tags: list[str] = []
     for tag, patterns in TAG_WORDS.items():
@@ -56,14 +60,17 @@ def infer_event_tags(title: str, keywords: list[str] | None = None) -> list[str]
 
 
 def score_publisher(publisher: str) -> float:
+    """Return a credibility score for *publisher* (0.0–1.0, default 0.5)."""
     return PUBLISHER_SCORES.get(publisher, 0.5)
 
 
 def dedupe_key(text: str) -> str:
+    """Normalize *text* into a lowercase, whitespace-collapsed deduplication key."""
     return re.sub(r'\W+', ' ', text.lower()).strip()
 
 
 def normalize_polygon_news_item(item: dict) -> NewsEvent:
+    """Convert a raw Polygon news API result into a :class:`NewsEvent`."""
     title = item.get('title', '')
     publisher = item.get('publisher', {}) or {}
     source_name = publisher.get('name', 'unknown')

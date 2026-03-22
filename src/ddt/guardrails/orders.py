@@ -1,3 +1,5 @@
+"""Pre-trade guardrail checks for order validation."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,12 +10,14 @@ from ..config import get_settings
 
 @dataclass(frozen=True)
 class GuardrailConfig:
+    """Thresholds and constraints used by :func:`evaluate_order_guardrails`."""
     max_notional: float
     banned_symbols: list[str]
     enforce_market_hours: bool = True
 
 
 def guardrail_config_from_settings() -> GuardrailConfig:
+    """Build a :class:`GuardrailConfig` from the current application settings."""
     settings = get_settings()
     return GuardrailConfig(
         max_notional=settings.max_order_notional,
@@ -23,6 +27,10 @@ def guardrail_config_from_settings() -> GuardrailConfig:
 
 
 def evaluate_order_guardrails(preview: dict[str, Any], market: dict[str, Any], config: GuardrailConfig, open_orders: list[dict[str, Any]], market_is_open: bool = True) -> list[str]:
+    """Return a list of human-readable guardrail violation notes for an order preview.
+
+    An empty list means the order passes all checks.
+    """
     notes: list[str] = []
     symbol = str(preview.get('symbol', '')).upper()
     side = str(preview.get('side', '')).lower()

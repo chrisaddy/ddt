@@ -1,3 +1,5 @@
+"""Alpaca Markets REST API client for trading and account management."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,6 +15,12 @@ Transport = Callable[..., Any]
 
 @dataclass
 class AlpacaClient:
+    """Thin wrapper around the Alpaca v2 REST API.
+
+    Credentials and base URL are loaded from :func:`~ddt.config.get_settings`
+    when not supplied directly.  An optional *transport* callable allows
+    tests to inject a fake HTTP layer.
+    """
     base_url: str | None = None
     api_key: str | None = None
     api_secret: str | None = None
@@ -30,6 +38,7 @@ class AlpacaClient:
             self.transport = urlopen
 
     def config_summary(self) -> Dict[str, str]:
+        """Return a redacted summary of the current client configuration."""
         return {
             'base_url': self.base_url or '',
             'api_key_present': str(bool(self.api_key)),
@@ -59,19 +68,24 @@ class AlpacaClient:
         return self._request('POST', path, payload)
 
     def get_account(self) -> Dict[str, Any]:
+        """Fetch the trading account details."""
         return self._get('/v2/account')
 
     def get_positions(self) -> list[Dict[str, Any]]:
+        """List all open positions."""
         return self._get('/v2/positions')
 
     def get_open_orders(self) -> list[Dict[str, Any]]:
+        """List open orders sorted by most recent first."""
         query = urlencode({'status': 'open', 'direction': 'desc'})
         return self._get(f'/v2/orders?{query}')
 
     def get_clock(self) -> Dict[str, Any]:
+        """Return the current market clock (open/close status and times)."""
         return self._get('/v2/clock')
 
     def preview_order(self, symbol: str, side: str, qty: str, time_in_force: str, asset_class: str = 'equity') -> Dict[str, Any]:
+        """Build a local preview dict for an order without submitting it."""
         return {
             'symbol': symbol.upper(),
             'side': side,
@@ -87,6 +101,7 @@ class AlpacaClient:
         }
 
     def submit_order(self, symbol: str, side: str, qty: str, time_in_force: str) -> Dict[str, Any]:
+        """Submit a market order to Alpaca."""
         payload = {
             'symbol': symbol.upper(),
             'side': side,

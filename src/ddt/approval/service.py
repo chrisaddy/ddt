@@ -1,3 +1,5 @@
+"""Proposal status lifecycle management (draft -> approved -> submitted -> filled)."""
+
 from __future__ import annotations
 
 from ..store import proposal_store
@@ -10,14 +12,19 @@ VALID_TRANSITIONS = {
 
 
 class ProposalNotFoundError(Exception):
-    pass
+    """Raised when a proposal ID does not exist in the store."""
 
 
 class InvalidTransitionError(Exception):
-    pass
+    """Raised when a status transition violates the allowed lifecycle."""
 
 
 def update_status(proposal_id: str, new_status: str) -> dict:
+    """Transition a proposal to *new_status*, persisting the change.
+
+    Raises :class:`ProposalNotFoundError` if the ID is unknown and
+    :class:`InvalidTransitionError` if the transition is not allowed.
+    """
     store = proposal_store()
     proposals = store.read_all()
     updated = None

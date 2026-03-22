@@ -1,3 +1,5 @@
+"""Headline-reaction strategy: generates buy/sell proposals from news sentiment."""
+
 from __future__ import annotations
 
 from typing import Iterable, List
@@ -16,9 +18,16 @@ EVENT_TAG_BONUS = {
 
 
 class HeadlineReactionStrategy:
+    """Strategy that maps headline sentiment to directional trade proposals.
+
+    Confidence is boosted or penalized by publisher credibility scores
+    and semantic event tags (e.g. earnings, analyst upgrade).
+    """
+
     name = 'headline_reaction'
 
     def _classify(self, event: NewsEvent) -> tuple[str | None, float]:
+        """Classify an event as buy, sell, or skip with a base confidence."""
         sentiment = str(event.metadata.get('sentiment', '')).lower()
         if sentiment == 'positive':
             return 'buy', 0.62
@@ -32,6 +41,7 @@ class HeadlineReactionStrategy:
         return None, 0.0
 
     def _adjust_confidence(self, event: NewsEvent, base_confidence: float) -> float:
+        """Adjust *base_confidence* using publisher score and event-tag bonuses."""
         score = float(event.metadata.get('source_score', 0.5) or 0.5)
         confidence = base_confidence + ((score - 0.5) * 0.2)
         for tag in event.metadata.get('event_tags', []):
@@ -39,6 +49,7 @@ class HeadlineReactionStrategy:
         return max(0.0, min(0.95, round(confidence, 2)))
 
     def generate(self, events: Iterable[NewsEvent]) -> List[TradeProposal]:
+        """Produce one proposal per (event, ticker) pair that has a clear signal."""
         proposals: List[TradeProposal] = []
         for event in events:
             side, base_confidence = self._classify(event)
