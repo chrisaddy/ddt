@@ -1,3 +1,5 @@
+"""Command-line interface for the ddt discretionary trading toolkit."""
+
 from __future__ import annotations
 
 import argparse
@@ -79,31 +81,37 @@ def _guarded_preview(args: argparse.Namespace) -> dict:
 
 
 def cmd_ibkr_summary(_: argparse.Namespace) -> int:
+    """Print the IBKR account summary as JSON."""
     print(json.dumps(_ibkr_client().account_summary(), indent=2))
     return 0
 
 
 def cmd_ibkr_positions(_: argparse.Namespace) -> int:
+    """Print open IBKR positions as JSON."""
     print(json.dumps(_ibkr_client().positions(), indent=2))
     return 0
 
 
 def cmd_ibkr_orders(_: argparse.Namespace) -> int:
+    """Print open IBKR orders as JSON."""
     print(json.dumps(_ibkr_client().open_orders(), indent=2))
     return 0
 
 
 def cmd_ibkr_contract_details(args: argparse.Namespace) -> int:
+    """Print IBKR contract details for a given contract ID."""
     print(json.dumps(_ibkr_client().contract_details(args.conid), indent=2))
     return 0
 
 
 def cmd_ibkr_market_snapshot(args: argparse.Namespace) -> int:
+    """Print a real-time IBKR market data snapshot for a contract ID."""
     print(json.dumps(_ibkr_client().market_snapshot(args.conid), indent=2))
     return 0
 
 
 def cmd_ibkr_review_future(args: argparse.Namespace) -> int:
+    """Print a consolidated futures review (search, details, snapshot, account)."""
     client = _ibkr_client()
     search = client.search_contracts(args.symbol)
     details = client.contract_details(args.conid)
@@ -120,54 +128,64 @@ def cmd_ibkr_review_future(args: argparse.Namespace) -> int:
     return 0
 
 def cmd_ibkr_status(_: argparse.Namespace) -> int:
+    """Print the IBKR client configuration summary."""
     print(json.dumps({'ibkr': _ibkr_client().config_summary()}, indent=2))
     return 0
 
 
 def cmd_ibkr_accounts(_: argparse.Namespace) -> int:
+    """Print linked IBKR brokerage accounts."""
     print(json.dumps(_ibkr_client().list_accounts(), indent=2))
     return 0
 
 
 def cmd_ibkr_search_contracts(args: argparse.Namespace) -> int:
+    """Search IBKR contracts by symbol and print results."""
     print(json.dumps(_ibkr_client().search_contracts(args.symbol), indent=2))
     return 0
 
 def cmd_status(_: argparse.Namespace) -> int:
+    """Print the Alpaca client configuration summary."""
     client = _alpaca_client()
     print(json.dumps({'alpaca': client.config_summary()}, indent=2))
     return 0
 
 
 def cmd_account(_: argparse.Namespace) -> int:
+    """Print Alpaca account details as JSON."""
     client = _alpaca_client()
     print(json.dumps(client.get_account(), indent=2))
     return 0
 
 
 def cmd_positions(_: argparse.Namespace) -> int:
+    """Print open Alpaca positions as JSON."""
     client = _alpaca_client()
     print(json.dumps(client.get_positions(), indent=2))
     return 0
 
 
 def cmd_orders(_: argparse.Namespace) -> int:
+    """Print open Alpaca orders as JSON."""
     client = _alpaca_client()
     print(json.dumps(client.get_open_orders(), indent=2))
     return 0
 
 
 def cmd_market_quote(args: argparse.Namespace) -> int:
+    """Print the latest Polygon trade quote for a symbol."""
     print(json.dumps(_polygon_client().get_last_trade(args.symbol), indent=2))
     return 0
 
 
 def cmd_preview_order(args: argparse.Namespace) -> int:
+    """Preview an order with guardrail checks (does not submit)."""
     print(json.dumps(_guarded_preview(args), indent=2))
     return 0
 
 
 def cmd_submit_order(args: argparse.Namespace) -> int:
+    """Submit an order after guardrail validation (requires ``--confirm``)."""
     if not args.confirm:
         print('Refusing to submit without --confirm')
         return 1
@@ -187,6 +205,7 @@ def cmd_submit_order(args: argparse.Namespace) -> int:
 
 
 def cmd_ingest_sample_news(_: argparse.Namespace) -> int:
+    """Write built-in sample news events to the event store."""
     store = event_store()
     events = sample_events()
     for event in events:
@@ -196,6 +215,7 @@ def cmd_ingest_sample_news(_: argparse.Namespace) -> int:
 
 
 def cmd_ingest_polygon_news(args: argparse.Namespace) -> int:
+    """Fetch and persist recent Polygon news for a symbol."""
     count = _ingest_polygon_news_for_symbol(args.symbol, args.limit)
     print(f'ingested {count} polygon news events')
     return 0
@@ -213,6 +233,7 @@ def _ingest_polygon_news_for_symbol(symbol: str, limit: int) -> int:
 
 
 def cmd_run_session(args: argparse.Namespace) -> int:
+    """Run a full ingest-propose-review session for a set of symbols."""
     symbols = [item.strip().upper() for item in args.symbols.split(',') if item.strip()]
     ingested = 0
     for symbol in symbols:
@@ -356,6 +377,7 @@ def _refresh_event_metadata(event: NewsEvent) -> NewsEvent:
 
 
 def cmd_backfill_event_metadata(_: argparse.Namespace) -> int:
+    """Re-derive sentiment, tags, and publisher scores for all stored events."""
     store = event_store()
     rows = store.read_all()
     updated_rows = []
@@ -410,6 +432,7 @@ def _event_from_row(row: dict) -> NewsEvent:
 
 
 def cmd_build_proposals_from_events(args: argparse.Namespace) -> int:
+    """Generate and persist trade proposals from stored events."""
     rows = event_store().read_all()
     events = [_event_from_row(row) for row in rows]
     if args.symbol:
@@ -424,12 +447,14 @@ def cmd_build_proposals_from_events(args: argparse.Namespace) -> int:
     return 0
 
 def cmd_list_events(_: argparse.Namespace) -> int:
+    """Print all stored news events as JSON."""
     for row in event_store().read_all():
         print(json.dumps(row, indent=2))
     return 0
 
 
 def cmd_propose_trades(_: argparse.Namespace) -> int:
+    """Generate trade proposals from sample data and persist them."""
     events = sample_events()
     strategy = HeadlineReactionStrategy()
     proposals = strategy.generate(events)
@@ -442,6 +467,7 @@ def cmd_propose_trades(_: argparse.Namespace) -> int:
 
 
 def cmd_list_proposals(_: argparse.Namespace) -> int:
+    """Print all stored trade proposals as JSON."""
     for row in proposal_store().read_all():
         print(json.dumps(row, indent=2))
     return 0
@@ -450,15 +476,18 @@ def cmd_list_proposals(_: argparse.Namespace) -> int:
 
 
 def cmd_review_symbol(args: argparse.Namespace) -> int:
+    """Print a full symbol review (news, proposals, ranking, preview)."""
     print(json.dumps(_review_symbol_payload(args), indent=2))
     return 0
 
 
 def cmd_review_watchlist(args: argparse.Namespace) -> int:
+    """Print a ranked watchlist for multiple symbols."""
     print(json.dumps(json.loads(_capture_watchlist_json(args)), indent=2))
     return 0
 
 def cmd_review_market(args: argparse.Namespace) -> int:
+    """Print a market overview (account, positions, orders, news)."""
     alpaca = _alpaca_client()
     polygon = _polygon_client()
     summary = {
@@ -472,6 +501,7 @@ def cmd_review_market(args: argparse.Namespace) -> int:
 
 
 def cmd_approve(args: argparse.Namespace) -> int:
+    """Transition a proposal to approved status."""
     try:
         updated = update_status(args.proposal_id, 'approved')
     except (ProposalNotFoundError, InvalidTransitionError) as exc:
@@ -515,6 +545,7 @@ def _render_report_html(payload: dict) -> str:
     body = md.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace("\n", '<br/>\n')
     return f'<html><body><h1>ddt review report</h1><div>{body}</div></body></html>\n'
 def cmd_export_review_report(args: argparse.Namespace) -> int:
+    """Export a review report as JSON, Markdown, or HTML."""
     if args.mode == 'symbol':
         payload = _review_symbol_payload(args)
     elif args.mode == 'watchlist':
@@ -536,6 +567,7 @@ def cmd_export_review_report(args: argparse.Namespace) -> int:
 
 
 def cmd_import_news_json(args: argparse.Namespace) -> int:
+    """Import news events from a local JSON file into the event store."""
     rows = json.loads(Path(args.input).read_text(encoding='utf-8'))
     store = event_store()
     count = 0
@@ -549,6 +581,7 @@ def cmd_import_news_json(args: argparse.Namespace) -> int:
     return 0
 
 def build_parser() -> argparse.ArgumentParser:
+    """Construct the top-level argument parser with all subcommands."""
     parser = argparse.ArgumentParser(prog='ddt')
     subparsers = parser.add_subparsers(dest='command', required=True)
 
@@ -635,6 +668,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Parse arguments and dispatch to the selected subcommand."""
     parser = build_parser()
     args = parser.parse_args()
     return args.func(args)
